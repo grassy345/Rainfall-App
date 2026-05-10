@@ -1,0 +1,25 @@
+# ── Android / Gradle ───────────────────────────────
+*.iml
+.gradle/
+.kotlin/
+/local.properties
+.idea/
+*.hprof
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# ── OS junk ────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── IDE ────────────────────────────────────────────
+*.swp
+*.swo
+*~

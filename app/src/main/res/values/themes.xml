@@ -1,0 +1,5 @@
+<resources>
+    <style name="Theme.RainfallMonitor" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- We'll customize this fully when building the UI -->
+    </style>
+</resources>
