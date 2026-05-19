@@ -41,6 +41,14 @@ interface RainfallReadingDao {
     fun getLatestReading(): Flow<RainfallReading?>
 
     /**
+     * Get the most recent reading for a specific date.
+     * Used for midnight boundary gap detection — check if the previous day's
+     * last reading connects seamlessly to the current day's first reading.
+     */
+    @Query("SELECT * FROM rainfall_readings WHERE datestamp = :date ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getLastReadingForDate(date: String): RainfallReading?
+
+    /**
      * Delete readings older than the given timestamp.
      * Optional retention cleanup — call periodically if storage is a concern.
      */
