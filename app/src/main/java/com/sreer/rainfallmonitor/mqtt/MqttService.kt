@@ -1,5 +1,6 @@
 package com.sreer.rainfallmonitor.mqtt
 
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
@@ -38,6 +39,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import kotlin.math.min
 
 /**
@@ -77,21 +79,61 @@ class MqttService : Service() {
 
         /** Persistent session expiry: 24 hours. */
         private const val SESSION_EXPIRY_SECONDS = 86_400L
+
+        /** Watchdog alarm interval: 15 minutes. */
+        private const val WATCHDOG_INTERVAL_MS = 15 * 60 * 1000L
+
+        /** Watchdog PendingIntent request code. */
+        private const val WATCHDOG_REQUEST_CODE = 1001
+
+        /** Intent action for re-posting the foreground notification. */
+        const val ACTION_REPOST_NOTIFICATION = "com.sreer.rainfallmonitor.ACTION_REPOST"
+
+        /**
+         * Schedules the watchdog alarm to fire in ~15 minutes.
+         * Called by:
+         *   - MqttService.onCreate() (self-healing loop — arms on every start)
+         *   - ServiceWatchdogReceiver (re-arms after each check)
+         */
+        fun scheduleWatchdog(context: Context) {
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            val intent = Intent(context, com.sreer.rainfallmonitor.receiver.ServiceWatchdogReceiver::class.java)
+            val pendingIntent = PendingIntent.getBroadcast(
+                context,
+                WATCHDOG_REQUEST_CODE,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val triggerAt = System.currentTimeMillis() + WATCHDOG_INTERVAL_MS
+
+            try {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerAt,
+                    pendingIntent
+                )
+                Log.d(TAG, "Watchdog alarm scheduled for ${WATCHDOG_INTERVAL_MS / 60000} min from now")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to schedule watchdog alarm: ${e.message}", e)
+            }
+        }
     }
 
     // ── Service-scoped coroutine scope (cancelled in onDestroy) ────────
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    // ── MQTT client (created fresh per connection attempt) ─────────────
-    private var mqttClient: Mqtt5AsyncClient? = null
+    // ── MQTT client (created ONCE in onCreate, REUSED across reconnections) ──
+    private lateinit var mqttClient: Mqtt5AsyncClient
     private var connectJob: Job? = null
+    private var monitorJob: Job? = null
     private var currentBackoff = INITIAL_BACKOFF_MS
-    private var isReconnecting = false
+    @Volatile private var isReconnecting = false
 
     // ── Network monitoring ────────────────────────────────────────────
     private lateinit var connectivityManager: ConnectivityManager
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
-    private var hasNetwork = false
+    @Volatile private var hasNetwork = false
 
     // ── Database & preferences ────────────────────────────────────────
     private lateinit var db: AppDatabase
@@ -122,6 +164,36 @@ class MqttService : Service() {
             startForeground(NOTIFICATION_ID, buildNotification("Connecting..."))
         }
 
+        // Build the MQTT client ONCE — reused across all reconnections.
+        // This preserves the HiveMQ session state (message queue).
+        val clientId = getOrCreateClientId()
+        mqttClient = Mqtt5Client.builder()
+            .identifier(clientId)
+            .serverHost(BuildConfig.MQTT_BROKER_HOST)
+            .serverPort(BuildConfig.MQTT_BROKER_PORT)
+            .sslWithDefaultConfig()
+            .buildAsync()
+        Log.i(TAG, "MQTT client built with ID: $clientId")
+
+        // Register global message handler BEFORE connecting.
+        // This is CRITICAL: when we reconnect with cleanStart=false, HiveMQ
+        // delivers queued messages IMMEDIATELY after CONNACK — before
+        // subscribeToTopic() can register a per-subscription callback.
+        // Without this, queued messages from overnight gaps are silently lost.
+        // See: https://hivemq.com/blog/hivemq-mqtt-client-best-practices/
+        val topic = BuildConfig.MQTT_TOPIC_STATUS
+        mqttClient.publishes(com.hivemq.client.mqtt.MqttGlobalPublishFilter.ALL) { publish ->
+            val payload = String(publish.payloadAsBytes)
+            Log.d(TAG, "Received on [${publish.topic}]: $payload")
+            serviceScope.launch {
+                processMessage(payload)
+            }
+        }
+        Log.d(TAG, "Global publish handler registered")
+
+        // Arm the watchdog alarm (self-healing loop)
+        scheduleWatchdog(this)
+
         // Register network callback (Layer 2)
         registerNetworkCallback()
 
@@ -131,7 +203,21 @@ class MqttService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.i(TAG, "onStartCommand called (flags=$flags, startId=$startId)")
-        // If already connected, this is a no-op
+
+        // Handle notification re-post request (from NotificationDismissReceiver)
+        if (intent?.action == ACTION_REPOST_NOTIFICATION) {
+            Log.w(TAG, "Re-posting foreground notification after dismiss")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    buildNotification("Connected"),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, buildNotification("Connected"))
+            }
+        }
+
         return START_STICKY
     }
 
@@ -149,6 +235,10 @@ class MqttService : Service() {
 
     override fun onDestroy() {
         Log.w(TAG, "Service being destroyed")
+
+        // Schedule watchdog as safety net — if START_STICKY doesn't restart
+        // us within 15 minutes, the watchdog alarm will
+        scheduleWatchdog(this)
 
         // Clean up network callback
         networkCallback?.let {
@@ -189,10 +279,30 @@ class MqttService : Service() {
             }
 
             override fun onLost(network: Network) {
-                Log.w(TAG, "Network lost")
-                hasNetwork = false
-                RainfallRepository.updateConnectionState(ConnectionState.OFFLINE)
-                updateNotification("Offline — no internet")
+                Log.w(TAG, "Network lost: $network")
+
+                // Don't blindly set hasNetwork=false — another network might
+                // still be available (e.g., WiFi drops but mobile data exists)
+                val activeNetwork = connectivityManager.activeNetwork
+                val caps = activeNetwork?.let { connectivityManager.getNetworkCapabilities(it) }
+                val stillHasInternet = caps?.hasCapability(
+                    NetworkCapabilities.NET_CAPABILITY_INTERNET
+                ) == true
+
+                if (stillHasInternet) {
+                    // Another network is available (e.g., mobile data after WiFi loss).
+                    // The old MQTT TCP connection is DEAD (it was bound to the lost
+                    // network), but mqttClient.state still shows CONNECTED until
+                    // the keepalive times out (~60s). Force a reconnect NOW.
+                    hasNetwork = true
+                    Log.i(TAG, "Still have internet — forcing reconnect on new network")
+                    forceReconnect()
+                } else {
+                    hasNetwork = false
+                    monitorJob?.cancel()
+                    RainfallRepository.updateConnectionState(ConnectionState.OFFLINE)
+                    updateNotification("Offline — no internet")
+                }
             }
         }
 
@@ -206,6 +316,25 @@ class MqttService : Service() {
         val activeNetwork = connectivityManager.activeNetwork
         val capabilities = activeNetwork?.let { connectivityManager.getNetworkCapabilities(it) }
         hasNetwork = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+    }
+
+    /**
+     * Force reconnect — bypasses the CONNECTED state guard.
+     *
+     * Used when the underlying network changes (e.g., WiFi → mobile data).
+     * The MQTT client state may still show CONNECTED (stale TCP socket),
+     * but the connection is actually dead. This method kills the old
+     * connection and starts fresh.
+     */
+    private fun forceReconnect() {
+        connectJob?.cancel()
+        monitorJob?.cancel()
+        isReconnecting = false
+
+        connectJob = serviceScope.launch {
+            disconnectMqtt()
+            reconnectLoop()
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -223,8 +352,7 @@ class MqttService : Service() {
         }
 
         // Guard: check if already connected
-        val client = mqttClient
-        if (client != null && client.state == MqttClientState.CONNECTED) {
+        if (mqttClient.state == MqttClientState.CONNECTED) {
             Log.d(TAG, "Already connected — skipping")
             return
         }
@@ -258,24 +386,13 @@ class MqttService : Service() {
             updateNotification("Connecting...")
 
             try {
-                // Disconnect previous client if it exists
+                // Disconnect cleanly if still connected (e.g., stale TCP)
                 disconnectMqtt()
 
-                // Create fresh client
-                val clientId = getOrCreateClientId()
-                val newClient = Mqtt5Client.builder()
-                    .identifier(clientId)
-                    .serverHost(BuildConfig.MQTT_BROKER_HOST)
-                    .serverPort(BuildConfig.MQTT_BROKER_PORT)
-                    .sslWithDefaultConfig()
-                    .buildAsync()
-
-                mqttClient = newClient
-
-                // Connect with persistent session
+                // Reconnect the SAME client (preserves session state)
                 Log.i(TAG, "Attempting MQTT connection to ${BuildConfig.MQTT_BROKER_HOST}:${BuildConfig.MQTT_BROKER_PORT}")
 
-                newClient.connectWith()
+                mqttClient.connectWith()
                     .simpleAuth()
                         .username(BuildConfig.MQTT_USERNAME)
                         .password(BuildConfig.MQTT_PASSWORD.toByteArray())
@@ -295,7 +412,7 @@ class MqttService : Service() {
                 updateNotification("Connected")
 
                 // Subscribe to topic
-                subscribeToTopic(newClient)
+                subscribeToTopic(mqttClient)
 
                 return // Exit the reconnect loop — we're connected
 
@@ -317,7 +434,12 @@ class MqttService : Service() {
 
     /**
      * Subscribe to the rainfall/status topic after connecting.
-     * The callback processes every incoming message.
+     *
+     * Only sends the SUBSCRIBE packet — the message handler is registered
+     * ONCE in onCreate() via client.publishes() (global handler).
+     * This avoids two problems:
+     *   1. Callback accumulation (N reconnections → N callbacks)
+     *   2. Queued messages lost (handler not ready when messages arrive)
      */
     private fun subscribeToTopic(client: Mqtt5AsyncClient) {
         val topic = BuildConfig.MQTT_TOPIC_STATUS
@@ -325,13 +447,6 @@ class MqttService : Service() {
         client.subscribeWith()
             .topicFilter(topic)
             .qos(com.hivemq.client.mqtt.datatypes.MqttQos.AT_LEAST_ONCE)
-            .callback { publish ->
-                val payload = String(publish.payloadAsBytes)
-                Log.d(TAG, "Received on [$topic]: $payload")
-                serviceScope.launch {
-                    processMessage(payload)
-                }
-            }
             .send()
             .whenComplete { _, error ->
                 if (error != null) {
@@ -341,10 +456,9 @@ class MqttService : Service() {
                 }
             }
 
-        // Also set a disconnect listener to trigger reconnection
-        // HiveMQ client's state can be polled, but we use a health-check
-        // coroutine to detect connection loss from keepalive timeouts
-        serviceScope.launch {
+        // Cancel any previous monitor before starting a new one
+        monitorJob?.cancel()
+        monitorJob = serviceScope.launch {
             monitorConnection(client)
         }
     }
@@ -369,18 +483,17 @@ class MqttService : Service() {
 
     /**
      * Safely disconnect the current MQTT client.
+     * Does NOT destroy the client — it's reused for reconnection.
      */
     private fun disconnectMqtt() {
         try {
-            val client = mqttClient
-            if (client != null && client.state == MqttClientState.CONNECTED) {
-                client.disconnect().get()
+            if (mqttClient.state == MqttClientState.CONNECTED) {
+                mqttClient.disconnect().get(3, TimeUnit.SECONDS)
                 Log.d(TAG, "MQTT disconnected cleanly")
             }
         } catch (e: Exception) {
             Log.w(TAG, "Error during MQTT disconnect: ${e.message}")
         }
-        mqttClient = null
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -392,9 +505,9 @@ class MqttService : Service() {
      *
      * Pipeline:
      *   1. Parse JSON → extract rate + timestamp
-     *   2. Save to Room DB (ALWAYS, even stale)
-     *   3. Update Repository StateFlows (ALWAYS)
-     *   4. Check stale (> 30 min) — skip notification if stale
+     *   2. Save to Room DB (ALWAYS, even stale — for historical record)
+     *   3. Check stale (> 30 min) — if stale, return early (DB only)
+     *   4. Update Repository StateFlows (FRESH messages only)
      *   5. Check rain transition — fire notification if fresh
      */
     private suspend fun processMessage(payload: String) {
@@ -415,18 +528,22 @@ class MqttService : Service() {
             db.rainfallReadingDao().insert(reading)
             Log.d(TAG, "Saved reading: rate=$rate, time=$timestamp, date=$datestamp")
 
-            // 2. Update Repository StateFlows (ALWAYS)
-            RainfallRepository.updateReading(rate, timestamp)
-
-            // 3. Stale message check (for NOTIFICATIONS ONLY)
+            // 2. Stale message check
             val now = System.currentTimeMillis()
             val messageAge = now - timestamp
             val isStale = messageAge > STALE_THRESHOLD_MS
 
             if (isStale) {
-                Log.d(TAG, "Stale message (${messageAge / 60000}min old) — saved but no notification")
-                return // Saved to DB + updated UI, but skip notification logic
+                Log.d(TAG, "Stale message (${messageAge / 60000}min old) — saved to DB only")
+                // Saved to DB for historical record, but do NOT update
+                // the repository (dashboard) or fire notifications.
+                // This prevents the UI from showing old data like
+                // "Heavy Rain" from 2 hours ago on first connect.
+                return
             }
+
+            // 3. Update Repository StateFlows (FRESH messages only)
+            RainfallRepository.updateReading(rate, timestamp)
 
             // 4. Rain transition detection (fresh messages only)
             val previousRate = prefs.getFloat(PREF_LAST_RATE, 0f)
@@ -482,11 +599,20 @@ class MqttService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        // deleteIntent fires when the notification is dismissed (swiped away)
+        // This re-posts it immediately so the service stays foreground
+        val dismissIntent = Intent(this, com.sreer.rainfallmonitor.receiver.NotificationDismissReceiver::class.java)
+        val deletePendingIntent = PendingIntent.getBroadcast(
+            this, 0, dismissIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         return NotificationCompat.Builder(this, RainfallApp.MQTT_CHANNEL_ID)
             .setContentTitle("Rainfall Monitor")
             .setContentText(text)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentIntent(pendingIntent)
+            .setDeleteIntent(deletePendingIntent)
             .setOngoing(true)
             .setSilent(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)

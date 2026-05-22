@@ -18,7 +18,10 @@ import androidx.room.PrimaryKey
  */
 @Entity(
     tableName = "rainfall_readings",
-    indices = [Index(value = ["datestamp"])]
+    indices = [
+        Index(value = ["datestamp"]),
+        Index(value = ["timestamp"], unique = true)
+    ]
 )
 data class RainfallReading(
     @PrimaryKey(autoGenerate = true)

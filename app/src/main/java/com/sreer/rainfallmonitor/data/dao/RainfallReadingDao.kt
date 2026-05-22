@@ -2,6 +2,7 @@ package com.sreer.rainfallmonitor.data.dao
 
 import androidx.room.Dao
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.sreer.rainfallmonitor.data.entity.RainfallReading
 import kotlinx.coroutines.flow.Flow
@@ -15,8 +16,13 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface RainfallReadingDao {
 
-    /** Insert a new reading. Called every time the MQTT service receives a message. */
-    @Insert
+    /**
+     * Insert a new reading. Called every time the MQTT service receives a message.
+     * Uses IGNORE strategy: if a reading with the same timestamp already exists
+     * (unique index), the duplicate is silently skipped. This handles QoS 1
+     * redelivery without crashing.
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(reading: RainfallReading)
 
     /**

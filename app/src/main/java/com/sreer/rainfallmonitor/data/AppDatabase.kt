@@ -16,7 +16,7 @@ import com.sreer.rainfallmonitor.data.entity.RainfallReading
  */
 @Database(
     entities = [RainfallReading::class],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -31,6 +31,9 @@ abstract class AppDatabase : RoomDatabase() {
          * Returns the singleton database instance, creating it on first call.
          *
          * Thread-safe via double-checked locking.
+         * fallbackToDestructiveMigration: during development, if the schema
+         * changes, just drop and recreate the database. In production,
+         * switch to proper migrations.
          */
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
@@ -38,7 +41,9 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "rainfall_monitor.db"
-                ).build().also { INSTANCE = it }
+                )
+                .fallbackToDestructiveMigration(true)
+                .build().also { INSTANCE = it }
             }
         }
     }

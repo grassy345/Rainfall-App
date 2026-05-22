@@ -13,9 +13,12 @@
     <!-- Notifications (Android 13+ requires runtime permission) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Boot receiver + watchdog alarm (Step 4) -->
+    <!-- Boot receiver + watchdog alarm -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+    <!-- Battery optimization whitelisting dialog -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
         android:name=".RainfallApp"
@@ -40,5 +43,29 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
+
+        <!-- Boot Receiver — starts MqttService on device boot -->
+        <receiver
+            android:name=".receiver.BootReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Watchdog Receiver — checks if MqttService is alive every ~15 min -->
+        <receiver
+            android:name=".receiver.ServiceWatchdogReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
+        <!-- Notification Dismiss Receiver — re-posts notification if swiped away -->
+        <receiver
+            android:name=".receiver.NotificationDismissReceiver"
+            android:enabled="true"
+            android:exported="false" />
     </application>
 </manifest>
