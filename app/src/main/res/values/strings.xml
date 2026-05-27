@@ -1,3 +1,27 @@
 <resources>
     <string name="app_name">Rainfall Monitor</string>
+
+    <!-- ── Dashboard ───────────────────────────────────────────────── -->
+    <string name="connection_connected">Connected</string>
+    <string name="connection_connecting">Connecting…</string>
+    <string name="connection_offline">Offline</string>
+
+    <string name="intensity_none">No Rain</string>
+    <string name="intensity_light">Light Rain</string>
+    <string name="intensity_moderate">Moderate Rain</string>
+    <string name="intensity_heavy">Heavy Rain</string>
+    <string name="intensity_violent">Violent Rain</string>
+
+    <string name="rate_format">%s mm/hr</string>
+    <string name="since_format">Since %s</string>
+    <string name="last_update_format">Last update: %s</string>
+    <string name="waiting_for_data">Waiting for data…</string>
+
+    <!-- ── ESP32 Warning ───────────────────────────────────────────── -->
+    <string name="esp32_warning_format">⚠ ESP32 may be offline — last reading was %s ago</string>
+
+    <!-- ── Graph Preview ───────────────────────────────────────────── -->
+    <string name="graph_header_today">Today\'s Rainfall</string>
+    <string name="graph_no_data">No data yet</string>
+    <string name="graph_fullscreen_desc">Fullscreen graph</string>
 </resources>

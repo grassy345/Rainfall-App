@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ── Brand Colors ────────────────────────────────────────────── -->
+    <color name="primary">#1976D2</color>             <!-- Blue 700 -->
+    <color name="primary_dark">#0D47A1</color>         <!-- Blue 900 -->
+    <color name="primary_light">#42A5F5</color>        <!-- Blue 400 -->
+    <color name="on_primary">#FFFFFF</color>
+
+    <!-- ── Surface / Background ────────────────────────────────────── -->
+    <color name="surface">#FAFAFA</color>              <!-- Near white -->
+    <color name="surface_card">#FFFFFF</color>          <!-- Card white -->
+    <color name="on_surface">#1C1B1F</color>           <!-- Dark text -->
+    <color name="on_surface_secondary">#49454F</color>  <!-- Secondary text -->
+
+    <!-- ── Connection State Colors ─────────────────────────────────── -->
+    <color name="state_connected">#2E7D32</color>      <!-- Green 800 -->
+    <color name="state_connecting">#F57F17</color>     <!-- Amber 900 -->
+    <color name="state_offline">#C62828</color>        <!-- Red 800 -->
+
+    <!-- ── Rain Intensity Colors ───────────────────────────────────── -->
+    <color name="intensity_none">#66BB6A</color>       <!-- Green 400 — No Rain -->
+    <color name="intensity_light">#42A5F5</color>      <!-- Blue 400 — Light Rain -->
+    <color name="intensity_moderate">#FFA726</color>   <!-- Orange 400 — Moderate -->
+    <color name="intensity_heavy">#EF5350</color>      <!-- Red 400 — Heavy -->
+    <color name="intensity_violent">#AB47BC</color>    <!-- Purple 400 — Violent -->
+    <color name="intensity_stale">#9E9E9E</color>     <!-- Grey 500 — Stale (>15 min old) -->
+
+    <!-- ── Chart Colors ────────────────────────────────────────────── -->
+    <color name="chart_line">#1976D2</color>            <!-- Blue 700 -->
+    <color name="chart_fill">#331976D2</color>          <!-- Blue 700 @ 20% alpha -->
+    <color name="chart_grid">#E0E0E0</color>           <!-- Grey 300 -->
+    <color name="chart_label">#757575</color>           <!-- Grey 600 -->
+
+    <!-- ── Warning Banner ──────────────────────────────────────────── -->
+    <color name="warning_background">#FFF3E0</color>   <!-- Orange 50 -->
+    <color name="warning_text">#E65100</color>         <!-- Orange 900 -->
+    <color name="warning_icon">#FB8C00</color>         <!-- Orange 600 -->
+</resources>

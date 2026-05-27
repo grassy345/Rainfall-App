@@ -66,8 +66,12 @@ class MqttService : Service() {
         private const val PREF_CLIENT_ID = "client_id"
         private const val PREF_LAST_RATE = "last_rate"
 
-        /** Messages older than this are considered stale (no notification fired). */
-        private const val STALE_THRESHOLD_MS = 30 * 60 * 1000L // 30 minutes
+        /**
+         * Messages older than this are considered stale.
+         * 15 min = 1.5× the ESP32's 10-min heartbeat interval.
+         * Also used as the gap detection threshold for "Since X ago".
+         */
+        private const val STALE_THRESHOLD_MS = 15 * 60 * 1000L // 15 minutes
 
         /** Backoff timing constants. */
         private const val INITIAL_BACKOFF_MS = 2_000L
@@ -151,6 +155,32 @@ class MqttService : Service() {
         db = AppDatabase.getInstance(applicationContext)
         prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         connectivityManager = getSystemService(ConnectivityManager::class.java)
+
+        // Bootstrap Repository from DB — populates the dashboard with the
+        // last known state BEFORE any MQTT messages arrive. Without this,
+        // the dashboard shows "Waiting for data..." until a FRESH message
+        // arrives, even if the DB has hundreds of readings.
+        serviceScope.launch {
+            try {
+                val latest = db.rainfallReadingDao().getLatestReadingOnce()
+                if (latest != null) {
+                    // Guard: only bootstrap if no fresh data has arrived yet.
+                    // This prevents a race where a fast MQTT message updates
+                    // the Repository BEFORE this DB read finishes, and then
+                    // the bootstrap overwrites the fresh value with an older one.
+                    if (RainfallRepository.lastUpdated.value == 0L) {
+                        RainfallRepository.updateReading(latest.hourlyRate, latest.timestamp)
+                        Log.i(TAG, "Bootstrapped Repository from DB: rate=${latest.hourlyRate}, time=${latest.timestamp}")
+                    } else {
+                        Log.d(TAG, "Skipping bootstrap — fresh data already in Repository")
+                    }
+                } else {
+                    Log.d(TAG, "No readings in DB — nothing to bootstrap")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to bootstrap from DB", e)
+            }
+        }
 
         // Start as foreground IMMEDIATELY (must be within 5 seconds)
         // Android 14+ (API 34) requires specifying the foreground service type
@@ -506,9 +536,12 @@ class MqttService : Service() {
      * Pipeline:
      *   1. Parse JSON → extract rate + timestamp
      *   2. Save to Room DB (ALWAYS, even stale — for historical record)
-     *   3. Check stale (> 30 min) — if stale, return early (DB only)
-     *   4. Update Repository StateFlows (FRESH messages only)
-     *   5. Check rain transition — fire notification if fresh
+     *   3. Check stale (> 15 min) — if stale, return early (DB only)
+     *   4. Detect data gap — if gap > 15 min since last reading,
+     *      flag it so Repository resets "Since X ago" (can't claim
+     *      continuity through a gap — it may have rained during it)
+     *   5. Update Repository StateFlows (FRESH messages only)
+     *   6. Check rain transition — fire notification if fresh
      */
     private suspend fun processMessage(payload: String) {
         try {
@@ -542,10 +575,21 @@ class MqttService : Service() {
                 return
             }
 
-            // 3. Update Repository StateFlows (FRESH messages only)
-            RainfallRepository.updateReading(rate, timestamp)
+            // 3. Detect data gap — if the time since the last Repository
+            // update exceeds the stale threshold, we can't claim the
+            // current rain/no-rain state has been continuous. It might
+            // have rained (or stopped) during the gap.
+            val lastKnownTimestamp = RainfallRepository.lastUpdated.value
+            val hasDataGap = lastKnownTimestamp != 0L &&
+                    (timestamp - lastKnownTimestamp) > STALE_THRESHOLD_MS
+            if (hasDataGap) {
+                Log.i(TAG, "Data gap detected: ${(timestamp - lastKnownTimestamp) / 60000}min since last reading")
+            }
 
-            // 4. Rain transition detection (fresh messages only)
+            // 4. Update Repository StateFlows (FRESH messages only)
+            RainfallRepository.updateReading(rate, timestamp, hasDataGap)
+
+            // 5. Rain transition detection (fresh messages only)
             val previousRate = prefs.getFloat(PREF_LAST_RATE, 0f)
             val wasRaining = previousRate > 0f
             val isRaining = rate > 0f

@@ -59,14 +59,22 @@ object RainfallRepository {
      *
      * @param rate     The hourly rate in mm/hr (0.0 = no rain)
      * @param timestamp The ESP32's NTP timestamp in milliseconds
+     * @param hasDataGap True if the gap between this reading and the previous
+     *                   one is larger than the expected interval (15 min).
+     *                   Forces a reset of [stateStartedAt] because we can't
+     *                   claim continuity across a gap — it might have rained
+     *                   (or stopped raining) during the gap.
      */
-    fun updateReading(rate: Float, timestamp: Long) {
+    fun updateReading(rate: Float, timestamp: Long, hasDataGap: Boolean = false) {
         val wasRaining = _hourlyRate.value > 0f
         val isRaining = rate > 0f
         val isFirstReading = _lastUpdated.value == 0L
 
-        // Set stateStartedAt on first-ever reading OR on state transition
-        if (isFirstReading || wasRaining != isRaining) {
+        // Reset stateStartedAt on:
+        //   1. First-ever reading (no prior state)
+        //   2. State transition (rain ↔ no rain)
+        //   3. Data gap detected (can't claim continuity through gap)
+        if (isFirstReading || wasRaining != isRaining || hasDataGap) {
             _stateStartedAt.value = timestamp
         }
 

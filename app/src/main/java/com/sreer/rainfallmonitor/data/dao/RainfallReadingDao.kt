@@ -40,11 +40,20 @@ interface RainfallReadingDao {
     fun getDatesWithData(): Flow<List<String>>
 
     /**
-     * Get the most recent reading.
-     * Used by the dashboard for current status and ESP32 aliveness check.
+     * Get the most recent reading as a reactive Flow.
+     * Used by the dashboard for ongoing observation.
      */
     @Query("SELECT * FROM rainfall_readings ORDER BY timestamp DESC LIMIT 1")
     fun getLatestReading(): Flow<RainfallReading?>
+
+    /**
+     * Get the most recent reading as a one-shot query.
+     * Used by MqttService to bootstrap the Repository on startup —
+     * populates the dashboard with the last known state before any
+     * MQTT messages arrive.
+     */
+    @Query("SELECT * FROM rainfall_readings ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getLatestReadingOnce(): RainfallReading?
 
     /**
      * Get the most recent reading for a specific date.

@@ -3,29 +3,47 @@ package com.sreer.rainfallmonitor
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffColorFilter
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
+import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import com.github.mikephil.charting.charts.LineChart
+import com.github.mikephil.charting.components.XAxis
+import com.github.mikephil.charting.data.Entry
+import com.github.mikephil.charting.data.LineData
+import com.github.mikephil.charting.data.LineDataSet
+import com.github.mikephil.charting.formatter.ValueFormatter
+import com.sreer.rainfallmonitor.data.entity.RainfallReading
 import com.sreer.rainfallmonitor.databinding.ActivityMainBinding
 import com.sreer.rainfallmonitor.mqtt.MqttService
+import com.sreer.rainfallmonitor.repository.ConnectionState
+import com.sreer.rainfallmonitor.ui.MainViewModel
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Main Activity — the single-screen dashboard.
  *
- * Responsibilities (Step 4):
- *   1. Start MqttService as a backup (in case boot receiver didn't fire)
- *   2. Request POST_NOTIFICATIONS permission (Android 13+)
- *   3. Prompt battery optimization whitelisting (one-time)
- *
- * The dashboard UI (Step 5) will be built on top of this foundation.
+ * Observes [MainViewModel] StateFlows and updates the UI reactively.
+ * Also starts the MQTT service, requests notification permission,
+ * and prompts for battery optimization whitelisting.
  */
 class MainActivity : AppCompatActivity() {
 
@@ -36,6 +54,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private lateinit var binding: ActivityMainBinding
+    private val viewModel: MainViewModel by viewModels()
+
+    /** Time format for chart X-axis labels. */
+    private val timeFormat = SimpleDateFormat("h:mm a", Locale.US)
+
+    /** Midnight timestamp for today, used as chart X-axis origin to avoid float precision loss. */
+    private var midnightMs = computeMidnightMs()
 
     // ── Android 13+ notification permission request ───────────────────
     private val notificationPermissionLauncher =
@@ -58,7 +83,6 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         // 1. Start the MQTT service (backup — in case boot receiver didn't fire)
-        //    If already running, this is a no-op (Android delivers onStartCommand)
         startMqttService()
 
         // 2. Request notification permission (Android 13+ / API 33+)
@@ -66,6 +90,298 @@ class MainActivity : AppCompatActivity() {
 
         // 3. Prompt battery optimization whitelisting (one-time)
         promptBatteryOptimization()
+
+        // 4. Set up the chart
+        setupChart()
+
+        // 5. Observe ViewModel flows and update UI
+        observeViewModel()
+
+        // 6. Fullscreen button placeholder (wired in Step 7)
+        binding.btnFullscreen.setOnClickListener {
+            Toast.makeText(this, "Full-screen graph coming soon!", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // VIEW MODEL OBSERVATION
+    // ═══════════════════════════════════════════════════════════════════
+
+    /**
+     * Observes all StateFlows from the ViewModel and updates the dashboard.
+     *
+     * Uses repeatOnLifecycle(STARTED) to automatically pause collection
+     * when the Activity is stopped and resume when started again.
+     * Each flow is collected in a separate coroutine to avoid blocking.
+     */
+    private fun observeViewModel() {
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+
+                // ── Connection state ──────────────────────────────────
+                launch {
+                    viewModel.connectionState.collect { state ->
+                        updateConnectionUI(state)
+                    }
+                }
+
+                // ── Hourly rate + intensity (combined with lastUpdated for stale detection) ──
+                launch {
+                    viewModel.hourlyRate
+                        .combine(viewModel.lastUpdated) { rate, lastUpdated ->
+                            Pair(rate, lastUpdated)
+                        }
+                        .collect { (rate, lastUpdated) ->
+                            updateRateUI(rate, lastUpdated)
+                        }
+                }
+
+                // ── State duration ("Since X ago") ────────────────────
+                launch {
+                    viewModel.stateStartedAt.collect { startedAt ->
+                        updateStateDurationUI(startedAt)
+                    }
+                }
+
+                // ── Last updated + ESP32 warning ──────────────────────
+                launch {
+                    viewModel.lastUpdated
+                        .combine(viewModel.connectionState) { lastUpdated, connState ->
+                            Pair(lastUpdated, connState)
+                        }
+                        .collect { (lastUpdated, connState) ->
+                            updateLastUpdatedUI(lastUpdated, connState)
+                        }
+                }
+
+                // ── Graph preview (today's readings) ──────────────────
+                launch {
+                    viewModel.getTodayReadings().collect { readings ->
+                        updateChart(readings)
+                    }
+                }
+
+                // ── Periodic time-ago refresh (every 30 seconds) ──────
+                // "Since X ago" and "Last update: X ago" are computed from
+                // timestamps. StateFlow only emits when the VALUE changes
+                // (every ~10 min when a new reading arrives). Without this
+                // ticker, "just now" stays on screen for 10 minutes.
+                // Also refreshes the stale visual state on the intensity text.
+                launch {
+                    while (true) {
+                        kotlinx.coroutines.delay(30_000)
+                        val rate = viewModel.hourlyRate.value
+                        val startedAt = viewModel.stateStartedAt.value
+                        val lastUpdated = viewModel.lastUpdated.value
+                        val connState = viewModel.connectionState.value
+
+                        updateRateUI(rate, lastUpdated)
+                        updateStateDurationUI(startedAt)
+                        updateLastUpdatedUI(lastUpdated, connState)
+                    }
+                }
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // UI UPDATE METHODS
+    // ═══════════════════════════════════════════════════════════════════
+
+    private fun updateConnectionUI(state: ConnectionState) {
+        // Update dot color
+        val colorRes = viewModel.getConnectionColorRes(state)
+        val color = ContextCompat.getColor(this, colorRes)
+        binding.viewConnectionDot.background.colorFilter =
+            PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN)
+
+        // Update label
+        binding.textConnectionState.text = viewModel.getConnectionLabel(state)
+        binding.textConnectionState.setTextColor(color)
+    }
+
+    private fun updateStateDurationUI(startedAt: Long) {
+        val text = if (startedAt == 0L) {
+            getString(R.string.waiting_for_data)
+        } else {
+            getString(R.string.since_format, viewModel.formatTimeAgo(startedAt))
+        }
+        binding.textStateDuration.text = text
+
+        // When data is stale (>15 min since last reading), the "Since X ago"
+        // claim is unverifiable — rain may have started or stopped during the
+        // gap. Strikethrough visually communicates "take this with a grain of salt."
+        val lastUpdated = viewModel.lastUpdated.value
+        val isStale = startedAt != 0L && viewModel.isDataStale(lastUpdated)
+
+        if (isStale) {
+            // Add strikethrough flag (bitmask OR)
+            binding.textStateDuration.paintFlags =
+                binding.textStateDuration.paintFlags or android.graphics.Paint.STRIKE_THRU_TEXT_FLAG
+            binding.textStateDuration.setTextColor(
+                ContextCompat.getColor(this, R.color.intensity_stale)
+            )
+        } else {
+            // Remove strikethrough flag (bitmask AND-NOT) — critical for when
+            // fresh data arrives and clears the stale state
+            binding.textStateDuration.paintFlags =
+                binding.textStateDuration.paintFlags and android.graphics.Paint.STRIKE_THRU_TEXT_FLAG.inv()
+            binding.textStateDuration.setTextColor(
+                ContextCompat.getColor(this, R.color.on_surface_secondary)
+            )
+        }
+    }
+
+    private fun updateRateUI(rate: Float, lastUpdated: Long) {
+        val isStale = viewModel.isDataStale(lastUpdated)
+
+        // Intensity label (large text) — grey when stale
+        binding.textIntensity.text = viewModel.getIntensityLabel(rate)
+        val intensityColor = if (isStale) {
+            ContextCompat.getColor(this, R.color.intensity_stale)
+        } else {
+            ContextCompat.getColor(this, viewModel.getIntensityColorRes(rate))
+        }
+        binding.textIntensity.setTextColor(intensityColor)
+
+        // Formatted rate — append "(stale)" when data is old
+        val rateText = if (isStale) {
+            getString(R.string.rate_format, viewModel.formatRate(rate)) + " (stale)"
+        } else {
+            getString(R.string.rate_format, viewModel.formatRate(rate))
+        }
+        binding.textRate.text = rateText
+    }
+
+    private fun updateLastUpdatedUI(lastUpdated: Long, connState: ConnectionState) {
+        // Last updated text
+        val text = if (lastUpdated == 0L) {
+            getString(R.string.waiting_for_data)
+        } else {
+            getString(R.string.last_update_format, viewModel.formatTimeAgo(lastUpdated))
+        }
+        binding.textLastUpdated.text = text
+
+        // ESP32 offline warning
+        if (viewModel.isEsp32Offline(connState, lastUpdated)) {
+            val age = viewModel.formatTimeAgo(lastUpdated)
+            binding.textEsp32Warning.text = getString(R.string.esp32_warning_format, age)
+            binding.cardEsp32Warning.visibility = View.VISIBLE
+        } else {
+            binding.cardEsp32Warning.visibility = View.GONE
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // CHART SETUP & UPDATE
+    // ═══════════════════════════════════════════════════════════════════
+
+    /**
+     * Configures the MPAndroidChart LineChart for the preview.
+     * Styling only — data is set in [updateChart].
+     */
+    private fun setupChart() {
+        val chart = binding.chartPreview
+
+        // General
+        chart.description.isEnabled = false
+        chart.legend.isEnabled = false
+        chart.setTouchEnabled(false)
+        chart.setDrawGridBackground(false)
+        chart.setNoDataText("")
+
+        // X-axis (bottom — time of day)
+        val xAxis = chart.xAxis
+        xAxis.position = XAxis.XAxisPosition.BOTTOM
+        xAxis.setDrawGridLines(true)
+        xAxis.gridColor = ContextCompat.getColor(this, R.color.chart_grid)
+        xAxis.textColor = ContextCompat.getColor(this, R.color.chart_label)
+        xAxis.textSize = 10f
+        xAxis.setLabelCount(5, false)
+        xAxis.valueFormatter = object : ValueFormatter() {
+            override fun getFormattedValue(value: Float): String {
+                // value = ms since midnight → convert back to absolute time
+                return timeFormat.format(Date(midnightMs + value.toLong()))
+            }
+        }
+
+        // Y-axis (left — rate in mm/hr)
+        val yAxis = chart.axisLeft
+        yAxis.setDrawGridLines(true)
+        yAxis.gridColor = ContextCompat.getColor(this, R.color.chart_grid)
+        yAxis.textColor = ContextCompat.getColor(this, R.color.chart_label)
+        yAxis.textSize = 10f
+        yAxis.axisMinimum = 0f
+        yAxis.valueFormatter = object : ValueFormatter() {
+            override fun getFormattedValue(value: Float): String {
+                return String.format(Locale.US, "%.1f", value)
+            }
+        }
+
+        // Hide right Y-axis
+        chart.axisRight.isEnabled = false
+    }
+
+    /**
+     * Updates the chart with today's readings.
+     *
+     * Simple plot: each reading = one data point (timestamp, rate).
+     * STEPPED mode makes the line flat between points (discrete intervals).
+     * No gap detection — that's added in Step 7.
+     */
+    private fun updateChart(readings: List<RainfallReading>) {
+        val chart = binding.chartPreview
+
+        if (readings.isEmpty()) {
+            chart.visibility = View.GONE
+            binding.textGraphNoData.visibility = View.VISIBLE
+            chart.clear()
+            return
+        }
+
+        chart.visibility = View.VISIBLE
+        binding.textGraphNoData.visibility = View.GONE
+
+        // Recompute midnight in case day changed
+        midnightMs = computeMidnightMs()
+
+        // Convert readings to chart entries.
+        // Use milliseconds-since-midnight as X value to avoid float precision loss.
+        // Raw timestamps are 13-digit Longs (e.g., 1779338186000). Float only has
+        // 7 digits of precision, which would round timestamps and cluster points.
+        // Offset from midnight gives values 0–86_400_000 (fits in float perfectly).
+        val entries = readings.map { reading ->
+            val xOffset = (reading.timestamp - midnightMs).toFloat()
+            Entry(xOffset, reading.hourlyRate)
+        }
+
+        // Create dataset
+        val dataSet = LineDataSet(entries, "Rainfall").apply {
+            mode = LineDataSet.Mode.STEPPED
+            color = ContextCompat.getColor(this@MainActivity, R.color.chart_line)
+            lineWidth = 2f
+            setDrawCircles(false)
+            setDrawValues(false)
+            setDrawFilled(true)
+            fillColor = ContextCompat.getColor(this@MainActivity, R.color.chart_line)
+            fillAlpha = 30
+        }
+
+        chart.data = LineData(dataSet)
+        chart.invalidate()
+    }
+
+    /**
+     * Returns the epoch milliseconds for midnight (00:00:00.000) today.
+     * Used as the chart X-axis origin.
+     */
+    private fun computeMidnightMs(): Long {
+        val cal = java.util.Calendar.getInstance()
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        cal.set(java.util.Calendar.MINUTE, 0)
+        cal.set(java.util.Calendar.SECOND, 0)
+        cal.set(java.util.Calendar.MILLISECOND, 0)
+        return cal.timeInMillis
     }
 
     // ═══════════════════════════════════════════════════════════════════

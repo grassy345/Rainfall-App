@@ -1,5 +1,10 @@
 <resources>
     <style name="Theme.RainfallMonitor" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- We'll customize this fully when building the UI -->
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorPrimaryDark">@color/primary_dark</item>
+        <item name="colorOnPrimary">@color/on_primary</item>
+        <item name="android:windowBackground">@color/surface</item>
+        <item name="android:statusBarColor">@color/surface</item>
+        <item name="android:windowLightStatusBar">true</item>
     </style>
 </resources>
