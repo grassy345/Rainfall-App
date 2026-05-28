@@ -65,6 +65,7 @@ class MqttService : Service() {
         private const val PREFS_NAME = "mqtt_prefs"
         private const val PREF_CLIENT_ID = "client_id"
         private const val PREF_LAST_RATE = "last_rate"
+        private const val PREF_ESP32_OFFLINE_NOTIFIED = "esp32_offline_notified"
 
         /**
          * Messages older than this are considered stale.
@@ -226,6 +227,41 @@ class MqttService : Service() {
 
         // Register network callback (Layer 2)
         registerNetworkCallback()
+
+        // Periodic ESP32 health check — fires a notification if the ESP32
+        // hasn't sent data for > 15 min while we're connected to HiveMQ.
+        // Checks every 30 seconds (matching the UI ticker in MainActivity)
+        // so the notification appears at the same time as the in-app banner.
+        // The stale check (age > 15 min) prevents premature firing.
+        // Uses a SharedPrefs flag to fire only ONCE per offline event —
+        // cleared when fresh data arrives in processMessage().
+        serviceScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(30_000) // 30 seconds — same as UI ticker
+
+                try {
+                    val connState = RainfallRepository.connectionState.value
+                    val lastUpdated = RainfallRepository.lastUpdated.value
+                    val alreadyNotified = prefs.getBoolean(PREF_ESP32_OFFLINE_NOTIFIED, false)
+
+                    if (connState == ConnectionState.CONNECTED
+                        && lastUpdated != 0L
+                        && !alreadyNotified
+                    ) {
+                        val age = System.currentTimeMillis() - lastUpdated
+                        if (age > STALE_THRESHOLD_MS) {
+                            val minutesAgo = age / 60_000
+                            Log.w(TAG, "ESP32 offline detected — no data for ${minutesAgo}min")
+                            com.sreer.rainfallmonitor.notification.NotificationHelper
+                                .showEsp32OfflineAlert(this@MqttService, minutesAgo)
+                            prefs.edit().putBoolean(PREF_ESP32_OFFLINE_NOTIFIED, true).apply()
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "ESP32 health check failed", e)
+                }
+            }
+        }
 
         // Start initial connection attempt (Layer 1)
         attemptConnection()
@@ -538,10 +574,10 @@ class MqttService : Service() {
      *   2. Save to Room DB (ALWAYS, even stale — for historical record)
      *   3. Check stale (> 15 min) — if stale, return early (DB only)
      *   4. Detect data gap — if gap > 15 min since last reading,
-     *      flag it so Repository resets "Since X ago" (can't claim
-     *      continuity through a gap — it may have rained during it)
+     *      flag it so Repository resets "Since X ago"
      *   5. Update Repository StateFlows (FRESH messages only)
-     *   6. Check rain transition — fire notification if fresh
+     *   6. Clear ESP32 offline notification (fresh data = ESP32 alive)
+     *   7. Check rain transition — fire notification if applicable
      */
     private suspend fun processMessage(payload: String) {
         try {
@@ -589,7 +625,17 @@ class MqttService : Service() {
             // 4. Update Repository StateFlows (FRESH messages only)
             RainfallRepository.updateReading(rate, timestamp, hasDataGap)
 
-            // 5. Rain transition detection (fresh messages only)
+            // 5. Clear ESP32 offline state — we just got fresh data!
+            // Dismiss any showing notification and reset the anti-spam flag
+            // so the next offline event triggers a new notification.
+            if (prefs.getBoolean(PREF_ESP32_OFFLINE_NOTIFIED, false)) {
+                prefs.edit().putBoolean(PREF_ESP32_OFFLINE_NOTIFIED, false).apply()
+                com.sreer.rainfallmonitor.notification.NotificationHelper
+                    .dismissEsp32OfflineAlert(this@MqttService)
+                Log.i(TAG, "ESP32 back online — dismissed offline notification")
+            }
+
+            // 6. Rain transition detection (fresh messages only)
             val previousRate = prefs.getFloat(PREF_LAST_RATE, 0f)
             val wasRaining = previousRate > 0f
             val isRaining = rate > 0f
@@ -597,10 +643,10 @@ class MqttService : Service() {
             // Save current rate for next comparison
             prefs.edit().putFloat(PREF_LAST_RATE, rate).apply()
 
-            if (!wasRaining && isRaining) {
-                Log.i(TAG, "Rain transition detected! rate=$rate mm/hr")
-                // Notification will be handled by NotificationHelper in Step 6
-                // For now, just log it
+            if (isRaining && (!wasRaining || hasDataGap)) {
+                Log.i(TAG, "Rain alert: rate=$rate mm/hr (gap=$hasDataGap, prev=$previousRate)")
+                com.sreer.rainfallmonitor.notification.NotificationHelper
+                    .showRainAlert(this@MqttService, rate)
             }
 
         } catch (e: Exception) {

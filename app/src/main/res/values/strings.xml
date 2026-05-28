@@ -18,7 +18,7 @@
     <string name="waiting_for_data">Waiting for data…</string>
 
     <!-- ── ESP32 Warning ───────────────────────────────────────────── -->
-    <string name="esp32_warning_format">⚠ ESP32 may be offline — last reading was %s ago</string>
+    <string name="esp32_warning_format">⚠ ESP32 may be offline — last reading was %s</string>
 
     <!-- ── Graph Preview ───────────────────────────────────────────── -->
     <string name="graph_header_today">Today\'s Rainfall</string>
