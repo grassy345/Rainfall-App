@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Full-screen graph layout hosted by GraphActivity.
+     Chart inside a rounded card with floating controls overlaid. -->
+<FrameLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/surface"
+    android:padding="12dp">
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- CHART CONTAINER — rounded card with subtle border           -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/cardChart"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:cardCornerRadius="20dp"
+        app:cardElevation="4dp"
+        app:cardBackgroundColor="@color/surface_card"
+        app:strokeWidth="1dp"
+        app:strokeColor="@color/chart_grid">
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+            <!-- Chart -->
+            <com.github.mikephil.charting.charts.LineChart
+                android:id="@+id/chartFullscreen"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone" />
+
+            <!-- No Data Overlay -->
+            <TextView
+                android:id="@+id/textNoData"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:text="No data for this date"
+                android:textSize="18sp"
+                android:textColor="@color/on_surface_secondary" />
+
+        </FrameLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- FLOATING DATE NAVIGATION — frosted pill, top center         -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <LinearLayout
+        android:id="@+id/layoutDateNav"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="8dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@drawable/bg_floating_pill"
+        android:elevation="8dp"
+        android:paddingStart="2dp"
+        android:paddingEnd="2dp"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp">
+
+        <!-- ← Previous date -->
+        <ImageButton
+            android:id="@+id/btnPrevDate"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_chevron_left"
+            android:scaleType="centerInside"
+            android:padding="6dp"
+            android:contentDescription="Previous date"
+            app:tint="@color/on_surface" />
+
+        <!-- Date label -->
+        <TextView
+            android:id="@+id/textDateLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="@color/on_surface"
+            tools:text="Today" />
+
+        <!-- → Next date -->
+        <ImageButton
+            android:id="@+id/btnNextDate"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_chevron_right"
+            android:scaleType="centerInside"
+            android:padding="6dp"
+            android:contentDescription="Next date"
+            app:tint="@color/on_surface" />
+
+        <!-- Separator dot -->
+        <View
+            android:layout_width="3dp"
+            android:layout_height="3dp"
+            android:layout_marginStart="2dp"
+            android:layout_marginEnd="2dp"
+            android:background="@drawable/connection_dot"
+            android:backgroundTint="@color/chart_label" />
+
+        <!-- 📅 Calendar picker -->
+        <ImageButton
+            android:id="@+id/btnCalendar"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_calendar"
+            android:scaleType="centerInside"
+            android:padding="6dp"
+            android:contentDescription="Pick date"
+            app:tint="@color/on_surface" />
+
+    </LinearLayout>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- FLOATING CLOSE BUTTON — frosted circle, top right           -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <ImageButton
+        android:id="@+id/btnClose"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="8dp"
+        android:layout_marginEnd="8dp"
+        android:background="@drawable/bg_floating_circle"
+        android:elevation="8dp"
+        android:src="@drawable/ic_close"
+        android:scaleType="centerInside"
+        android:padding="8dp"
+        android:contentDescription="Close"
+        app:tint="@color/on_surface_secondary" />
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- FLOATING "TODAY" CHIP — appears only when viewing past data  -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <TextView
+        android:id="@+id/chipToday"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="16dp"
+        android:background="@drawable/bg_floating_pill"
+        android:elevation="8dp"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        android:text="↩ Jump to Today"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        android:textColor="@color/primary"
+        android:visibility="gone"
+        tools:visibility="visible" />
+
+</FrameLayout>

@@ -32,6 +32,9 @@ import com.sreer.rainfallmonitor.databinding.ActivityMainBinding
 import com.sreer.rainfallmonitor.mqtt.MqttService
 import com.sreer.rainfallmonitor.repository.ConnectionState
 import com.sreer.rainfallmonitor.ui.MainViewModel
+import com.sreer.rainfallmonitor.ui.graph.GraphActivity
+import com.sreer.rainfallmonitor.ui.graph.GraphDataBuilder
+import com.sreer.rainfallmonitor.ui.graph.GraphViewModel
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -55,6 +58,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private val viewModel: MainViewModel by viewModels()
+    private val graphViewModel: GraphViewModel by viewModels()
 
     /** Time format for chart X-axis labels. */
     private val timeFormat = SimpleDateFormat("h:mm a", Locale.US)
@@ -97,9 +101,9 @@ class MainActivity : AppCompatActivity() {
         // 5. Observe ViewModel flows and update UI
         observeViewModel()
 
-        // 6. Fullscreen button placeholder (wired in Step 7)
+        // 6. Fullscreen button -> opens landscape graph screen
         binding.btnFullscreen.setOnClickListener {
-            Toast.makeText(this, "Full-screen graph coming soon!", Toast.LENGTH_SHORT).show()
+            startActivity(Intent(this, GraphActivity::class.java))
         }
     }
 
@@ -325,9 +329,9 @@ class MainActivity : AppCompatActivity() {
     /**
      * Updates the chart with today's readings.
      *
-     * Simple plot: each reading = one data point (timestamp, rate).
-     * STEPPED mode makes the line flat between points (discrete intervals).
-     * No gap detection — that's added in Step 7.
+     * Uses [GraphDataBuilder] for gap detection, midnight boundary
+     * handling, and live edge extension. Each continuous segment
+     * becomes a separate DataSet so gaps appear as visual breaks.
      */
     private fun updateChart(readings: List<RainfallReading>) {
         val chart = binding.chartPreview
@@ -345,31 +349,55 @@ class MainActivity : AppCompatActivity() {
         // Recompute midnight in case day changed
         midnightMs = computeMidnightMs()
 
-        // Convert readings to chart entries.
-        // Use milliseconds-since-midnight as X value to avoid float precision loss.
-        // Raw timestamps are 13-digit Longs (e.g., 1779338186000). Float only has
-        // 7 digits of precision, which would round timestamps and cluster points.
-        // Offset from midnight gives values 0–86_400_000 (fits in float perfectly).
-        val entries = readings.map { reading ->
-            val xOffset = (reading.timestamp - midnightMs).toFloat()
-            Entry(xOffset, reading.hourlyRate)
+        // Build chart data with gap detection via GraphDataBuilder
+        graphViewModel.buildChartData(readings) { chartData ->
+            renderPreviewChart(chart, chartData)
+        }
+    }
+
+    /**
+     * Renders segmented chart data on the preview chart.
+     * Each segment = one continuous line. Gaps = visual breaks.
+     */
+    private fun renderPreviewChart(chart: LineChart, chartData: GraphDataBuilder.ChartData) {
+        if (chartData.segments.isEmpty()) {
+            chart.clear()
+            return
         }
 
-        // Create dataset
-        val dataSet = LineDataSet(entries, "Rainfall").apply {
-            mode = LineDataSet.Mode.STEPPED
-            color = ContextCompat.getColor(this@MainActivity, R.color.chart_line)
-            lineWidth = 2f
-            setDrawCircles(false)
-            setDrawValues(false)
-            setDrawFilled(true)
-            fillColor = ContextCompat.getColor(this@MainActivity, R.color.chart_line)
-            fillAlpha = 30
+        val lineColor = ContextCompat.getColor(this, R.color.chart_line)
+
+        val dataSets = chartData.segments.mapIndexed { index, segment ->
+            LineDataSet(segment.entries, "Segment $index").apply {
+                mode = LineDataSet.Mode.STEPPED
+                color = lineColor
+                lineWidth = 2f
+                setDrawCircles(false)
+                setDrawValues(false)
+                setDrawFilled(true)
+                fillColor = lineColor
+                fillAlpha = 30
+            }
         }
 
-        chart.data = LineData(dataSet)
+        chart.data = LineData(dataSets)
+
+        // Set X-axis range: midnight to now (today)
+        chart.xAxis.axisMinimum = chartData.xMin
+        chart.xAxis.axisMaximum = chartData.xMax
+
+        chart.notifyDataSetChanged()
         chart.invalidate()
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // GRAPH OVERLAY
+    // ═══════════════════════════════════════════════════════════════════
+
+
+    // ═══════════════════════════════════════════════════════════════════
+    // MIDNIGHT CALCULATION
+    // ═══════════════════════════════════════════════════════════════════
 
     /**
      * Returns the epoch milliseconds for midnight (00:00:00.000) today.

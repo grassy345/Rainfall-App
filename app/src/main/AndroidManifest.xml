@@ -37,6 +37,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".ui.graph.GraphActivity"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+
         <!-- MQTT Foreground Service — connectedDevice type (no 6-hour limit) -->
         <service
             android:name=".mqtt.MqttService"

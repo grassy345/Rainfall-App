@@ -1,219 +1,238 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView
+<!-- Main Activity layout: title fixed at top, scrollable dashboard below. -->
+<LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:orientation="vertical"
     android:fitsSystemWindows="true"
-    android:fillViewport="true"
     android:background="@color/surface">
 
-    <LinearLayout
-        android:layout_width="match_parent"
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- APP HEADER (fixed, never scrolls, always visible)          -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <TextView
+        android:id="@+id/textAppTitle"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="16dp">
+        android:text="@string/app_name"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:textColor="@color/on_surface"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="16dp"
+        android:paddingBottom="16dp" />
 
-        <!-- ═══════════════════════════════════════════════════════════ -->
-        <!-- APP HEADER                                                  -->
-        <!-- ═══════════════════════════════════════════════════════════ -->
-        <TextView
-            android:id="@+id/textAppTitle"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/app_name"
-            android:textSize="24sp"
-            android:textStyle="bold"
-            android:textColor="@color/on_surface"
-            android:layout_marginBottom="16dp" />
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- CONTENT AREA: Dashboard scroll                              -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true">
 
-        <!-- ═══════════════════════════════════════════════════════════ -->
-        <!-- DASHBOARD CARD                                              -->
-        <!-- ═══════════════════════════════════════════════════════════ -->
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/cardDashboard"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp"
-            app:cardElevation="2dp"
-            app:cardCornerRadius="16dp"
-            app:cardBackgroundColor="@color/surface_card">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:padding="20dp">
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:paddingBottom="16dp">
 
-                <!-- Connection Status Row -->
-                <LinearLayout
+                <!-- ═══════════════════════════════════════════════ -->
+                <!-- DASHBOARD CARD                                  -->
+                <!-- ═══════════════════════════════════════════════ -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardDashboard"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:layout_marginBottom="16dp">
-
-                    <View
-                        android:id="@+id/viewConnectionDot"
-                        android:layout_width="12dp"
-                        android:layout_height="12dp"
-                        android:background="@drawable/connection_dot"
-                        android:layout_marginEnd="8dp" />
-
-                    <TextView
-                        android:id="@+id/textConnectionState"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:textSize="14sp"
-                        android:textColor="@color/on_surface_secondary"
-                        tools:text="Connected" />
-
-                </LinearLayout>
-
-                <!-- Intensity (large text) -->
-                <TextView
-                    android:id="@+id/textIntensity"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textSize="32sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/intensity_none"
-                    android:layout_marginBottom="4dp"
-                    tools:text="No Rain" />
-
-                <!-- Hourly Rate -->
-                <TextView
-                    android:id="@+id/textRate"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textSize="18sp"
-                    android:textColor="@color/on_surface"
                     android:layout_marginBottom="16dp"
-                    tools:text="0.00 mm/hr" />
+                    app:cardElevation="2dp"
+                    app:cardCornerRadius="16dp"
+                    app:cardBackgroundColor="@color/surface_card">
 
-                <!-- Divider -->
-                <View
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="20dp">
+
+                        <!-- Connection Status Row -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginBottom="16dp">
+
+                            <View
+                                android:id="@+id/viewConnectionDot"
+                                android:layout_width="12dp"
+                                android:layout_height="12dp"
+                                android:background="@drawable/connection_dot"
+                                android:layout_marginEnd="8dp" />
+
+                            <TextView
+                                android:id="@+id/textConnectionState"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:textSize="14sp"
+                                android:textColor="@color/on_surface_secondary"
+                                tools:text="Connected" />
+
+                        </LinearLayout>
+
+                        <!-- Intensity (large text) -->
+                        <TextView
+                            android:id="@+id/textIntensity"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textSize="32sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/intensity_none"
+                            android:layout_marginBottom="4dp"
+                            tools:text="No Rain" />
+
+                        <!-- Hourly Rate -->
+                        <TextView
+                            android:id="@+id/textRate"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textSize="18sp"
+                            android:textColor="@color/on_surface"
+                            android:layout_marginBottom="16dp"
+                            tools:text="0.00 mm/hr" />
+
+                        <!-- Divider -->
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:background="@color/chart_grid"
+                            android:layout_marginBottom="12dp" />
+
+                        <!-- State Duration -->
+                        <TextView
+                            android:id="@+id/textStateDuration"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textSize="14sp"
+                            android:textColor="@color/on_surface_secondary"
+                            android:layout_marginBottom="4dp"
+                            tools:text="Since 2 hours ago" />
+
+                        <!-- Last Updated -->
+                        <TextView
+                            android:id="@+id/textLastUpdated"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textSize="14sp"
+                            android:textColor="@color/on_surface_secondary"
+                            tools:text="Last update: 3 min ago" />
+
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- ═══════════════════════════════════════════════ -->
+                <!-- ESP32 OFFLINE WARNING BANNER                    -->
+                <!-- ═══════════════════════════════════════════════ -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardEsp32Warning"
                     android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:background="@color/chart_grid"
-                    android:layout_marginBottom="12dp" />
-
-                <!-- State Duration -->
-                <TextView
-                    android:id="@+id/textStateDuration"
-                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textSize="14sp"
-                    android:textColor="@color/on_surface_secondary"
-                    android:layout_marginBottom="4dp"
-                    tools:text="Since 2 hours ago" />
-
-                <!-- Last Updated -->
-                <TextView
-                    android:id="@+id/textLastUpdated"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textSize="14sp"
-                    android:textColor="@color/on_surface_secondary"
-                    tools:text="Last update: 3 min ago" />
-
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- ═══════════════════════════════════════════════════════════ -->
-        <!-- ESP32 OFFLINE WARNING BANNER                                -->
-        <!-- ═══════════════════════════════════════════════════════════ -->
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/cardEsp32Warning"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp"
-            android:visibility="gone"
-            app:cardElevation="0dp"
-            app:cardCornerRadius="12dp"
-            app:cardBackgroundColor="@color/warning_background"
-            app:strokeWidth="0dp">
-
-            <TextView
-                android:id="@+id/textEsp32Warning"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:padding="12dp"
-                android:textSize="13sp"
-                android:textColor="@color/warning_text"
-                tools:text="⚠ ESP32 may be offline — last reading was 45 min ago" />
-
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- ═══════════════════════════════════════════════════════════ -->
-        <!-- GRAPH PREVIEW CARD                                          -->
-        <!-- ═══════════════════════════════════════════════════════════ -->
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/cardGraph"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            app:cardElevation="2dp"
-            app:cardCornerRadius="16dp"
-            app:cardBackgroundColor="@color/surface_card">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="16dp">
-
-                <!-- Graph Header Row -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:layout_marginBottom="8dp">
+                    android:layout_marginBottom="16dp"
+                    android:visibility="gone"
+                    app:cardElevation="0dp"
+                    app:cardCornerRadius="12dp"
+                    app:cardBackgroundColor="@color/warning_background"
+                    app:strokeWidth="0dp">
 
                     <TextView
-                        android:id="@+id/textGraphHeader"
-                        android:layout_width="0dp"
+                        android:id="@+id/textEsp32Warning"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="@string/graph_header_today"
-                        android:textSize="16sp"
-                        android:textStyle="bold"
-                        android:textColor="@color/on_surface" />
+                        android:padding="12dp"
+                        android:textSize="13sp"
+                        android:textColor="@color/warning_text"
+                        tools:text="⚠ ESP32 may be offline — last reading was 45 min ago" />
 
-                    <!-- Fullscreen button (wired in Step 7) -->
-                    <ImageButton
-                        android:id="@+id/btnFullscreen"
-                        android:layout_width="40dp"
-                        android:layout_height="40dp"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        android:contentDescription="@string/graph_fullscreen_desc"
-                        android:src="@android:drawable/ic_menu_crop"
-                        android:scaleType="centerInside"
-                        android:padding="8dp"
-                        app:tint="@color/on_surface_secondary" />
+                </com.google.android.material.card.MaterialCardView>
 
-                </LinearLayout>
-
-                <!-- Chart View -->
-                <com.github.mikephil.charting.charts.LineChart
-                    android:id="@+id/chartPreview"
+                <!-- ═══════════════════════════════════════════════ -->
+                <!-- GRAPH PREVIEW CARD                              -->
+                <!-- ═══════════════════════════════════════════════ -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardGraph"
                     android:layout_width="match_parent"
-                    android:layout_height="200dp"
-                    android:visibility="gone" />
+                    android:layout_height="wrap_content"
+                    app:cardElevation="2dp"
+                    app:cardCornerRadius="16dp"
+                    app:cardBackgroundColor="@color/surface_card">
 
-                <!-- No Data Overlay -->
-                <TextView
-                    android:id="@+id/textGraphNoData"
-                    android:layout_width="match_parent"
-                    android:layout_height="200dp"
-                    android:gravity="center"
-                    android:text="@string/graph_no_data"
-                    android:textSize="16sp"
-                    android:textColor="@color/on_surface_secondary" />
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="16dp">
+
+                        <!-- Graph Header Row -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginBottom="8dp">
+
+                            <TextView
+                                android:id="@+id/textGraphHeader"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="@string/graph_header_today"
+                                android:textSize="16sp"
+                                android:textStyle="bold"
+                                android:textColor="@color/on_surface" />
+
+                            <!-- Fullscreen button -->
+                            <ImageButton
+                                android:id="@+id/btnFullscreen"
+                                android:layout_width="40dp"
+                                android:layout_height="40dp"
+                                android:background="?attr/selectableItemBackgroundBorderless"
+                                android:contentDescription="@string/graph_fullscreen_desc"
+                                android:src="@drawable/ic_fullscreen"
+                                android:scaleType="centerInside"
+                                android:padding="8dp"
+                                app:tint="@color/on_surface_secondary" />
+
+                        </LinearLayout>
+
+                        <!-- Chart View -->
+                        <com.github.mikephil.charting.charts.LineChart
+                            android:id="@+id/chartPreview"
+                            android:layout_width="match_parent"
+                            android:layout_height="200dp"
+                            android:visibility="gone" />
+
+                        <!-- No Data Overlay -->
+                        <TextView
+                            android:id="@+id/textGraphNoData"
+                            android:layout_width="match_parent"
+                            android:layout_height="200dp"
+                            android:gravity="center"
+                            android:text="@string/graph_no_data"
+                            android:textSize="16sp"
+                            android:textColor="@color/on_surface_secondary" />
+
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
 
             </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
+        </ScrollView>
 
-    </LinearLayout>
-</ScrollView>
+
+</LinearLayout>

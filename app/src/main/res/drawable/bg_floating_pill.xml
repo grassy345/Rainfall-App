@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Semi-transparent frosted pill background for floating date navigation controls.
+     90% white opacity lets the chart show through subtly. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#E6FFFFFF" />
+    <corners android:radius="24dp" />
+    <stroke
+        android:width="0.5dp"
+        android:color="#22000000" />
+</shape>
