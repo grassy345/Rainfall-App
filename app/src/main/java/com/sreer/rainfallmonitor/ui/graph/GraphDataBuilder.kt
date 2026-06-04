@@ -68,13 +68,12 @@ object GraphDataBuilder {
     ): ChartData {
         val endOfDayMs = midnightMs + 24 * 60 * 60 * 1000L
 
-        // X-axis range: midnight to midnight (or NOW for today)
-        val xMin = 0f  // midnight offset = 0
-        val xMax = if (isToday) {
-            (nowMs - midnightMs).toFloat()
-        } else {
-            (endOfDayMs - midnightMs).toFloat() // 86_400_000
-        }
+        // X-axis always spans the full day (midnight → midnight) so the
+        // right edge is stable. For today, the live-edge extension still
+        // draws the stepped line up to NOW, but the X-axis extends to
+        // midnight, giving breathing room so the latest spike is visible.
+        val xMin = 0f
+        val xMax = (endOfDayMs - midnightMs).toFloat() // 86_400_000
 
         if (readings.isEmpty()) {
             return ChartData(emptyList(), xMin, xMax)
