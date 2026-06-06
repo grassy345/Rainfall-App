@@ -42,6 +42,10 @@
             android:exported="false"
             android:screenOrientation="landscape" />
 
+        <activity
+            android:name=".ui.table.ReadingsActivity"
+            android:exported="false" />
+
         <!-- MQTT Foreground Service — connectedDevice type (no 6-hour limit) -->
         <service
             android:name=".mqtt.MqttService"

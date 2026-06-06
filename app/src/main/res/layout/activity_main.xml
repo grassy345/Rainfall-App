@@ -169,6 +169,7 @@
                     android:id="@+id/cardGraph"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:layout_marginBottom="16dp"
                     app:cardElevation="2dp"
                     app:cardCornerRadius="16dp"
                     app:cardBackgroundColor="@color/surface_card">
@@ -226,6 +227,77 @@
                             android:gravity="center"
                             android:text="@string/graph_no_data"
                             android:textSize="16sp"
+                            android:textColor="@color/on_surface_secondary" />
+
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- ═══════════════════════════════════════════════ -->
+                <!-- READINGS TABLE PREVIEW CARD                     -->
+                <!-- ═══════════════════════════════════════════════ -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardReadings"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="16dp"
+                    app:cardElevation="2dp"
+                    app:cardCornerRadius="16dp"
+                    app:cardBackgroundColor="@color/surface_card">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="16dp">
+
+                        <!-- Readings Header Row -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginBottom="4dp">
+
+                            <TextView
+                                android:id="@+id/textReadingsHeader"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="@string/readings_header_today"
+                                android:textSize="16sp"
+                                android:textStyle="bold"
+                                android:textColor="@color/on_surface" />
+
+                            <!-- Fullscreen button -->
+                            <ImageButton
+                                android:id="@+id/btnReadingsFullscreen"
+                                android:layout_width="40dp"
+                                android:layout_height="40dp"
+                                android:background="?attr/selectableItemBackgroundBorderless"
+                                android:contentDescription="@string/readings_fullscreen_desc"
+                                android:src="@drawable/ic_fullscreen"
+                                android:scaleType="centerInside"
+                                android:padding="8dp"
+                                app:tint="@color/on_surface_secondary" />
+
+                        </LinearLayout>
+
+                        <!-- Readings list -->
+                        <androidx.recyclerview.widget.RecyclerView
+                            android:id="@+id/recyclerReadingsPreview"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:nestedScrollingEnabled="false"
+                            android:visibility="gone" />
+
+                        <!-- No Data Overlay -->
+                        <TextView
+                            android:id="@+id/textReadingsNoData"
+                            android:layout_width="match_parent"
+                            android:layout_height="48dp"
+                            android:gravity="center"
+                            android:text="@string/readings_no_data"
+                            android:textSize="14sp"
                             android:textColor="@color/on_surface_secondary" />
 
                     </LinearLayout>

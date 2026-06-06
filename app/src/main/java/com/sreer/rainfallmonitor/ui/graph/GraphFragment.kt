@@ -1,5 +1,6 @@
 package com.sreer.rainfallmonitor.ui.graph
 
+import android.graphics.Color
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -11,13 +12,14 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.github.mikephil.charting.components.XAxis
+import com.github.mikephil.charting.data.Entry
 import com.github.mikephil.charting.data.LineData
 import com.github.mikephil.charting.data.LineDataSet
 import com.github.mikephil.charting.formatter.ValueFormatter
 import com.google.android.material.datepicker.MaterialDatePicker
 import com.sreer.rainfallmonitor.R
 import com.sreer.rainfallmonitor.databinding.FragmentGraphBinding
-import kotlinx.coroutines.flow.combine
+
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -174,11 +176,11 @@ class GraphFragment : Fragment() {
             .build()
 
         picker.addOnPositiveButtonClickListener { selection ->
-            // MaterialDatePicker returns UTC midnight — must parse with UTC timezone.
-            val utcFormat = SimpleDateFormat("dd/MM/yyyy", Locale.US).apply {
-                timeZone = java.util.TimeZone.getTimeZone("UTC")
-            }
-            val dateStr = utcFormat.format(Date(selection))
+            // MaterialDatePicker returns UTC midnight — convert to local timezone
+            // so the date string matches getTodayDate() and Room datestamps.
+            val localOffset = java.util.TimeZone.getDefault().getOffset(selection)
+            val localFormat = SimpleDateFormat("dd/MM/yyyy", Locale.US)
+            val dateStr = localFormat.format(Date(selection + localOffset))
             viewModel.navigateToDate(dateStr)
         }
 
@@ -202,30 +204,32 @@ class GraphFragment : Fragment() {
                 }
 
                 // React to date changes + readings
+                // NOTE: Use readingsForDate.collect directly (not combine with selectedDate)
+                // to avoid a race where combine fires with stale readings + new date before
+                // flatMapLatest has switched to the new date's query.
                 launch {
-                    viewModel.readingsForDate
-                        .combine(viewModel.selectedDate) { readings, date ->
-                            Triple(readings, date, viewModel.isToday(date))
+                    viewModel.readingsForDate.collect { readings ->
+                        val currentDate = viewModel.selectedDate.value
+                        val isToday = viewModel.isToday(currentDate)
+
+                        // Update date label
+                        binding.textDateLabel.text = viewModel.formatDateForDisplay(currentDate)
+                        updateNavigationButtons()
+
+                        // Show/hide "Jump to Today" chip
+                        binding.chipToday.visibility =
+                            if (isToday) View.GONE else View.VISIBLE
+
+                        // Update X-axis formatter + MarkerView midnight
+                        val midnightMs = viewModel.computeMidnightMs(currentDate)
+                        updateXAxisFormatter(midnightMs)
+                        markerView.midnightMs = midnightMs
+
+                        // Build and render chart data
+                        viewModel.buildChartData(readings) { chartData ->
+                            renderChart(chartData)
                         }
-                        .collect { (readings, date, isToday) ->
-                            // Update date label
-                            binding.textDateLabel.text = viewModel.formatDateForDisplay(date)
-                            updateNavigationButtons()
-
-                            // Show/hide "Jump to Today" chip
-                            binding.chipToday.visibility =
-                                if (isToday) View.GONE else View.VISIBLE
-
-                            // Update X-axis formatter + MarkerView midnight
-                            val midnightMs = viewModel.computeMidnightMs(date)
-                            updateXAxisFormatter(midnightMs)
-                            markerView.midnightMs = midnightMs
-
-                            // Build and render chart data
-                            viewModel.buildChartData(readings) { chartData ->
-                                renderChart(chartData)
-                            }
-                        }
+                    }
                 }
             }
         }
@@ -254,16 +258,24 @@ class GraphFragment : Fragment() {
         val highlightColor = ContextCompat.getColor(ctx, R.color.chart_label)
 
         // Each segment = one DataSet = one continuous line
-        val dataSets = chartData.segments.mapIndexed { index, segment ->
+        val segmentSets = chartData.segments.mapIndexed { index, segment ->
             LineDataSet(segment.entries, "Segment $index").apply {
                 mode = LineDataSet.Mode.STEPPED
                 color = lineColor
                 lineWidth = 2f
-                setDrawCircles(false)
                 setDrawValues(false)
                 setDrawFilled(true)
                 fillColor = lineColor
                 fillAlpha = 30
+
+                if (segment.entries.size == 1) {
+                    setDrawCircles(true)
+                    circleRadius = 3.5f
+                    setCircleColor(lineColor)
+                    circleHoleRadius = 0f
+                } else {
+                    setDrawCircles(false)
+                }
 
                 // Highlight (tap-to-inspect) styling
                 isHighlightEnabled = true
@@ -273,7 +285,44 @@ class GraphFragment : Fragment() {
             }
         }
 
-        chart.data = LineData(dataSets)
+        // ── Gap region hatch fills ──────────────────────────────────
+        val allDataSets = if (chartData.gapRegions.isEmpty()) {
+            segmentSets
+        } else {
+            // Compute a Y-axis max that is safely above the highest data point
+            val maxRate = chartData.segments
+                .flatMap { it.entries }
+                .maxOfOrNull { it.y } ?: 0f
+            val hatchY = maxOf(maxRate * 1.3f, 5f)
+
+            val gapSets = chartData.gapRegions.map { gap ->
+                LineDataSet(
+                    listOf(Entry(gap.xStart, hatchY), Entry(gap.xEnd, hatchY)),
+                    "Gap"
+                ).apply {
+                    setDrawFilled(true)
+                    fillColor = ContextCompat.getColor(ctx, R.color.chart_grid)
+                    fillAlpha = 80
+                    color = Color.TRANSPARENT
+                    lineWidth = 0f
+                    setDrawCircles(false)
+                    setDrawValues(false)
+                    isHighlightEnabled = false
+                }
+            }
+            segmentSets + gapSets
+        }
+
+        chart.highlightValue(null)
+        chart.data = LineData(allDataSets)
+
+        // Lock Y-axis max so gap DataSets don't push the scale up
+        if (chartData.gapRegions.isNotEmpty()) {
+            val maxRate = chartData.segments
+                .flatMap { it.entries }
+                .maxOfOrNull { it.y } ?: 0f
+            chart.axisLeft.axisMaximum = maxOf(maxRate * 1.3f, 5f)
+        }
 
         // Set X-axis range
         chart.xAxis.axisMinimum = chartData.xMin
@@ -309,12 +358,22 @@ class GraphFragment : Fragment() {
         val currentDate = viewModel.selectedDate.value
         val currentIndex = availableDates.indexOf(currentDate)
 
-        // Previous = older date = higher index in newest-first list
-        binding.btnPrevDate.isEnabled = currentIndex >= 0 && currentIndex < availableDates.size - 1
-        binding.btnPrevDate.alpha = if (binding.btnPrevDate.isEnabled) 1.0f else 0.3f
+        val hasPrevious: Boolean
+        val hasNext: Boolean
 
-        // Next = newer date = lower index
-        binding.btnNextDate.isEnabled = currentIndex > 0
-        binding.btnNextDate.alpha = if (binding.btnNextDate.isEnabled) 1.0f else 0.3f
+        if (currentIndex >= 0) {
+            // Date has data — use index-based navigation
+            hasPrevious = currentIndex < availableDates.size - 1
+            hasNext = currentIndex > 0
+        } else {
+            // Empty date — check if older/newer dates exist
+            hasPrevious = availableDates.any { viewModel.isDateBefore(it, currentDate) }
+            hasNext = availableDates.any { !viewModel.isDateBefore(it, currentDate) }
+        }
+
+        binding.btnPrevDate.isEnabled = hasPrevious
+        binding.btnPrevDate.alpha = if (hasPrevious) 1.0f else 0.3f
+        binding.btnNextDate.isEnabled = hasNext
+        binding.btnNextDate.alpha = if (hasNext) 1.0f else 0.3f
     }
 }

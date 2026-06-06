@@ -24,4 +24,10 @@
     <string name="graph_header_today">Today\'s Rainfall</string>
     <string name="graph_no_data">No data yet</string>
     <string name="graph_fullscreen_desc">Fullscreen graph</string>
+
+    <!-- ── Readings Table ──────────────────────────────────────────── -->
+    <string name="readings_header_today">Today\'s Readings</string>
+    <string name="readings_no_data">No readings for this date</string>
+    <string name="readings_fullscreen_desc">View all readings</string>
+    <string name="readings_activity_title">Readings</string>
 </resources>

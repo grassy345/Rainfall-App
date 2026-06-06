@@ -143,14 +143,15 @@
         app:tint="@color/on_surface_secondary" />
 
     <!-- ═══════════════════════════════════════════════════════════ -->
-    <!-- FLOATING "TODAY" CHIP — appears only when viewing past data  -->
+    <!-- FLOATING "TODAY" CHIP — top-left, opposite the close button -->
     <!-- ═══════════════════════════════════════════════════════════ -->
     <TextView
         android:id="@+id/chipToday"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="bottom|center_horizontal"
-        android:layout_marginBottom="16dp"
+        android:layout_gravity="top|start"
+        android:layout_marginTop="8dp"
+        android:layout_marginStart="8dp"
         android:background="@drawable/bg_floating_pill"
         android:elevation="8dp"
         android:paddingStart="20dp"

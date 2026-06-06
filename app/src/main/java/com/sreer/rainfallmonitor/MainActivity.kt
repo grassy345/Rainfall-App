@@ -3,6 +3,7 @@ package com.sreer.rainfallmonitor
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffColorFilter
 import android.net.Uri
@@ -35,6 +36,10 @@ import com.sreer.rainfallmonitor.ui.MainViewModel
 import com.sreer.rainfallmonitor.ui.graph.GraphActivity
 import com.sreer.rainfallmonitor.ui.graph.GraphDataBuilder
 import com.sreer.rainfallmonitor.ui.graph.GraphViewModel
+
+import com.sreer.rainfallmonitor.ui.table.ReadingsActivity
+import com.sreer.rainfallmonitor.ui.table.ReadingsAdapter
+import com.sreer.rainfallmonitor.ui.table.ReadingsListItem
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -59,9 +64,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private val viewModel: MainViewModel by viewModels()
     private val graphViewModel: GraphViewModel by viewModels()
+    private val readingsAdapter = ReadingsAdapter()
 
     /** Time format for chart X-axis labels. */
-    private val timeFormat = SimpleDateFormat("h:mm a", Locale.US)
+    private val timeFormat = SimpleDateFormat("hh:mm a", Locale.US)
 
     /** Midnight timestamp for today, used as chart X-axis origin to avoid float precision loss. */
     private var midnightMs = computeMidnightMs()
@@ -98,12 +104,20 @@ class MainActivity : AppCompatActivity() {
         // 4. Set up the chart
         setupChart()
 
-        // 5. Observe ViewModel flows and update UI
+        // 5. Set up readings preview list
+        setupReadingsPreview()
+
+        // 6. Observe ViewModel flows and update UI
         observeViewModel()
 
-        // 6. Fullscreen button -> opens landscape graph screen
+        // 7. Fullscreen button -> opens landscape graph screen
         binding.btnFullscreen.setOnClickListener {
             startActivity(Intent(this, GraphActivity::class.java))
+        }
+
+        // 8. Readings fullscreen button -> opens readings table
+        binding.btnReadingsFullscreen.setOnClickListener {
+            startActivity(Intent(this, ReadingsActivity::class.java))
         }
     }
 
@@ -160,8 +174,15 @@ class MainActivity : AppCompatActivity() {
 
                 // ── Graph preview (today's readings) ──────────────────
                 launch {
-                    viewModel.getTodayReadings().collect { readings ->
+                    viewModel.todayReadings.collect { readings ->
                         updateChart(readings)
+                    }
+                }
+
+                // ── Readings table preview (latest 10) ────────────────
+                launch {
+                    viewModel.latestTodayReadings.collect { readings ->
+                        updateReadingsPreview(readings)
                     }
                 }
 
@@ -277,6 +298,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    // READINGS PREVIEW SETUP
+    // ═══════════════════════════════════════════════════════════════════
+
+    private fun setupReadingsPreview() {
+        binding.recyclerReadingsPreview.layoutManager =
+            androidx.recyclerview.widget.LinearLayoutManager(this)
+        binding.recyclerReadingsPreview.adapter = readingsAdapter
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     // CHART SETUP & UPDATE
     // ═══════════════════════════════════════════════════════════════════
 
@@ -367,20 +398,64 @@ class MainActivity : AppCompatActivity() {
 
         val lineColor = ContextCompat.getColor(this, R.color.chart_line)
 
-        val dataSets = chartData.segments.mapIndexed { index, segment ->
+        val segmentSets = chartData.segments.mapIndexed { index, segment ->
             LineDataSet(segment.entries, "Segment $index").apply {
                 mode = LineDataSet.Mode.STEPPED
                 color = lineColor
                 lineWidth = 2f
-                setDrawCircles(false)
                 setDrawValues(false)
                 setDrawFilled(true)
                 fillColor = lineColor
                 fillAlpha = 30
+
+                if (segment.entries.size == 1) {
+                    setDrawCircles(true)
+                    circleRadius = 3.5f
+                    setCircleColor(lineColor)
+                    circleHoleRadius = 0f
+                } else {
+                    setDrawCircles(false)
+                }
             }
         }
 
-        chart.data = LineData(dataSets)
+        // ── Gap region hatch fills ──────────────────────────────────
+        val allDataSets = if (chartData.gapRegions.isEmpty()) {
+            segmentSets
+        } else {
+            val maxRate = chartData.segments
+                .flatMap { it.entries }
+                .maxOfOrNull { it.y } ?: 0f
+            val hatchY = maxOf(maxRate * 1.3f, 5f)
+
+            val ctx = this
+            val gapSets = chartData.gapRegions.map { gap ->
+                LineDataSet(
+                    listOf(Entry(gap.xStart, hatchY), Entry(gap.xEnd, hatchY)),
+                    "Gap"
+                ).apply {
+                    setDrawFilled(true)
+                    fillColor = ContextCompat.getColor(ctx, R.color.chart_grid)
+                    fillAlpha = 80
+                    color = Color.TRANSPARENT
+                    lineWidth = 0f
+                    setDrawCircles(false)
+                    setDrawValues(false)
+                    isHighlightEnabled = false
+                }
+            }
+            segmentSets + gapSets
+        }
+
+        chart.data = LineData(allDataSets)
+
+        // Lock Y-axis max so gap DataSets don't push the scale up
+        if (chartData.gapRegions.isNotEmpty()) {
+            val maxRate = chartData.segments
+                .flatMap { it.entries }
+                .maxOfOrNull { it.y } ?: 0f
+            chart.axisLeft.axisMaximum = maxOf(maxRate * 1.3f, 5f)
+        }
 
         // Set X-axis range: midnight to now (today)
         chart.xAxis.axisMinimum = chartData.xMin
@@ -391,9 +466,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    // GRAPH OVERLAY
+    // READINGS TABLE PREVIEW UPDATE
     // ═══════════════════════════════════════════════════════════════════
 
+    private fun updateReadingsPreview(readings: List<RainfallReading>) {
+        if (readings.isEmpty()) {
+            binding.recyclerReadingsPreview.visibility = View.GONE
+            binding.textReadingsNoData.visibility = View.VISIBLE
+            readingsAdapter.submitList(emptyList())
+            return
+        }
+
+        binding.recyclerReadingsPreview.visibility = View.VISIBLE
+        binding.textReadingsNoData.visibility = View.GONE
+        readingsAdapter.submitList(readings.map { ReadingsListItem.Reading(it) })
+    }
 
     // ═══════════════════════════════════════════════════════════════════
     // MIDNIGHT CALCULATION

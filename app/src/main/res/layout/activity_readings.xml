@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/readingsActivityRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:fitsSystemWindows="true"
+    android:background="@color/surface">
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- TOP BAR: Back + Title + Date Nav (compact)                -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="4dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="8dp">
+
+        <!-- Close / Back button -->
+        <ImageButton
+            android:id="@+id/btnClose"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_close"
+            android:scaleType="centerInside"
+            android:padding="8dp"
+            android:contentDescription="Close"
+            app:tint="@color/on_surface_secondary" />
+
+        <!-- Title -->
+        <TextView
+            android:id="@+id/textTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="@color/on_surface"
+            android:paddingStart="8dp"
+            android:text="@string/readings_activity_title" />
+
+        <!-- ← Previous date -->
+        <ImageButton
+            android:id="@+id/btnPrevDate"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_chevron_left"
+            android:scaleType="centerInside"
+            android:padding="6dp"
+            android:contentDescription="Previous date"
+            app:tint="@color/on_surface" />
+
+        <!-- Date label -->
+        <TextView
+            android:id="@+id/textDateLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="@color/on_surface"
+            tools:text="Today" />
+
+        <!-- → Next date -->
+        <ImageButton
+            android:id="@+id/btnNextDate"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_chevron_right"
+            android:scaleType="centerInside"
+            android:padding="6dp"
+            android:contentDescription="Next date"
+            app:tint="@color/on_surface" />
+
+        <!-- 📅 Calendar picker -->
+        <ImageButton
+            android:id="@+id/btnCalendar"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_calendar"
+            android:scaleType="centerInside"
+            android:padding="6dp"
+            android:contentDescription="Pick date"
+            app:tint="@color/on_surface" />
+
+    </LinearLayout>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- CONTENT — scrollable readings list                          -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <com.google.android.material.card.MaterialCardView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="12dp"
+        app:cardCornerRadius="16dp"
+        app:cardElevation="2dp"
+        app:cardBackgroundColor="@color/surface_card">
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/recyclerReadings"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp" />
+
+            <TextView
+                android:id="@+id/textNoData"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:text="@string/readings_no_data"
+                android:textSize="16sp"
+                android:textColor="@color/on_surface_secondary"
+                android:visibility="gone" />
+
+        </FrameLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- "Jump to Today" chip — appears only when viewing past data  -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <TextView
+        android:id="@+id/chipToday"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginBottom="16dp"
+        android:background="@drawable/bg_floating_pill"
+        android:elevation="4dp"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        android:text="↩ Jump to Today"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        android:textColor="@color/primary"
+        android:visibility="gone"
+        tools:visibility="visible" />
+
+</LinearLayout>

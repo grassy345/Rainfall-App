@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.sreer.rainfallmonitor.data.AppDatabase
 import com.sreer.rainfallmonitor.data.entity.RainfallReading
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -67,9 +68,13 @@ class GraphViewModel(application: Application) : AndroidViewModel(application) {
     fun navigatePrevious(availableDates: List<String>) {
         val currentDate = _selectedDate.value
         val currentIndex = availableDates.indexOf(currentDate)
-        // availableDates is newest-first, so "previous" = next index (older date)
         if (currentIndex >= 0 && currentIndex < availableDates.size - 1) {
+            // availableDates is newest-first, so "previous" = next index (older date)
             _selectedDate.value = availableDates[currentIndex + 1]
+        } else if (currentIndex == -1) {
+            // Empty date — find nearest older date with data
+            val older = availableDates.firstOrNull { isDateBefore(it, currentDate) }
+            if (older != null) _selectedDate.value = older
         }
     }
 
@@ -82,9 +87,13 @@ class GraphViewModel(application: Application) : AndroidViewModel(application) {
     fun navigateNext(availableDates: List<String>) {
         val currentDate = _selectedDate.value
         val currentIndex = availableDates.indexOf(currentDate)
-        // availableDates is newest-first, so "next" = previous index (newer date)
         if (currentIndex > 0) {
+            // availableDates is newest-first, so "next" = previous index (newer date)
             _selectedDate.value = availableDates[currentIndex - 1]
+        } else if (currentIndex == -1) {
+            // Empty date — find nearest newer date with data
+            val newer = availableDates.lastOrNull { !isDateBefore(it, currentDate) }
+            if (newer != null) _selectedDate.value = newer
         }
     }
 
@@ -100,42 +109,54 @@ class GraphViewModel(application: Application) : AndroidViewModel(application) {
 
     // ── Chart data building ──────────────────────────────────────────
 
+    /** Cancels any in-flight chart build to avoid stale callbacks. */
+    private var buildChartJob: Job? = null
+
     /**
      * Builds chart data for the currently selected date.
      *
-     * Fetches the previous day's last reading (for midnight boundary),
-     * then delegates to [GraphDataBuilder].
-     *
-     * @param readings Today's readings (from [readingsForDate])
-     * @param onResult Callback with the built [GraphDataBuilder.ChartData]
+     * Fetches the previous day's last reading and next day's first reading
+     * (for midnight boundary), then delegates to [GraphDataBuilder].
+     * Cancels any previously launched build to avoid stale callbacks.
      */
     fun buildChartData(
         readings: List<RainfallReading>,
         onResult: (GraphDataBuilder.ChartData) -> Unit
     ) {
-        viewModelScope.launch {
+        buildChartJob?.cancel()
+        buildChartJob = viewModelScope.launch {
             val currentDate = _selectedDate.value
             val isToday = currentDate == getTodayDate()
             val midnightMs = computeMidnightMs(currentDate)
-
-            // Get previous day's last reading for midnight boundary
             val prevDate = getPreviousDate(currentDate)
+            val nextDate = getNextDate(currentDate)
+
             val previousDayLast = dao.getLastReadingForDate(prevDate)
+            val nextDayFirst = dao.getFirstReadingForDate(nextDate)
 
             val chartData = GraphDataBuilder.build(
                 readings = readings,
                 previousDayLast = previousDayLast,
+                nextDayFirst = nextDayFirst,
                 midnightMs = midnightMs,
                 isToday = isToday
             )
-
             onResult(chartData)
         }
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────
+    /**
+     * Compares two dd/MM/yyyy date strings. Returns true if date1 < date2.
+     */
+    fun isDateBefore(date1: String, date2: String): Boolean {
+        val d1 = dateFormat.parse(date1) ?: return false
+        val d2 = dateFormat.parse(date2) ?: return false
+        return d1.before(d2)
+    }
 
-    /** Returns today's date in dd/MM/yyyy format. */
+    /**
+     * Returns today's date in dd/MM/yyyy format.
+     */
     fun getTodayDate(): String = dateFormat.format(Date())
 
     /** Returns true if the selected date is today (for a given date string). */
@@ -167,6 +188,17 @@ class GraphViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * Returns the date string for the day AFTER the given date.
+     */
+    private fun getNextDate(dateStr: String): String {
+        val date = dateFormat.parse(dateStr) ?: return dateStr
+        val cal = Calendar.getInstance()
+        cal.time = date
+        cal.add(Calendar.DAY_OF_MONTH, 1)
+        return dateFormat.format(cal.time)
+    }
+
+    /**
      * Formats a dd/MM/yyyy date string for display.
      * Today → "Today", Yesterday → "Yesterday", else → "29 May 2026"
      */
@@ -177,9 +209,9 @@ class GraphViewModel(application: Application) : AndroidViewModel(application) {
         if (dateStr == yesterday) return "Yesterday"
 
         return try {
-            val date = dateFormat.parse(dateStr)
+            val date = dateFormat.parse(dateStr) ?: return dateStr
             val displayFormat = SimpleDateFormat("d MMM yyyy", Locale.US)
-            displayFormat.format(date!!)
+            displayFormat.format(date)
         } catch (e: Exception) {
             dateStr
         }

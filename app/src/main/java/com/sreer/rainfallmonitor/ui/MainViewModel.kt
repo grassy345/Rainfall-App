@@ -2,12 +2,18 @@ package com.sreer.rainfallmonitor.ui
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import com.sreer.rainfallmonitor.data.AppDatabase
 import com.sreer.rainfallmonitor.data.entity.RainfallReading
 import com.sreer.rainfallmonitor.repository.ConnectionState
 import com.sreer.rainfallmonitor.repository.RainfallRepository
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -23,6 +29,7 @@ import java.util.Locale
  * Survives configuration changes (screen rotation). The Repository is a
  * singleton, so the ViewModel always reads the latest data.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = AppDatabase.getInstance(application)
@@ -34,17 +41,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val lastUpdated: StateFlow<Long> = RainfallRepository.lastUpdated
     val stateStartedAt: StateFlow<Long> = RainfallRepository.stateStartedAt
 
+    // ── Today date tracking (auto-advances at midnight) ──────────────
+
+    private val _todayDate = MutableStateFlow(getTodayDate())
+
+    init {
+        // Every 30 seconds, re-evaluate "today" to handle midnight rollover.
+        // If the day changed, flatMapLatest auto-restarts the Room queries.
+        viewModelScope.launch {
+            while (true) {
+                delay(30_000)
+                _todayDate.value = getTodayDate()
+            }
+        }
+    }
+
     // ── Today's readings for graph preview ────────────────────────────
 
-    /**
-     * Returns a Flow of today's readings for the graph preview.
-     *
-     * This is a FUNCTION (not a property) because the date string must
-     * be evaluated fresh each time. If it were a val, it would capture
-     * the date at ViewModel creation time and break at midnight.
-     */
-    fun getTodayReadings(): Flow<List<RainfallReading>> =
-        db.rainfallReadingDao().getReadingsForDate(getTodayDate())
+    /** Reactive Flow of all readings for today, re-queries at day change. */
+    val todayReadings: Flow<List<RainfallReading>> =
+        _todayDate.flatMapLatest { date ->
+            db.rainfallReadingDao().getReadingsForDate(date)
+        }
+
+    /** Reactive Flow of the latest 10 readings for today, re-queries at day change. */
+    val latestTodayReadings: Flow<List<RainfallReading>> =
+        _todayDate.flatMapLatest { date ->
+            db.rainfallReadingDao().getLatestReadingsForDate(date, 10)
+        }
 
     /** Returns today's date in dd/MM/yyyy format (matches MqttService's datestamp). */
     fun getTodayDate(): String = dateFormat.format(Date())
