@@ -5,13 +5,13 @@ import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
-import androidx.core.view.WindowCompat
+import androidx.activity.enableEdgeToEdge
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.sreer.rainfallmonitor.R
 import com.sreer.rainfallmonitor.databinding.ActivityGraphBinding
+import com.sreer.rainfallmonitor.ui.SensorMode
 
 /**
  * Landscape graph screen launched from the dashboard preview.
@@ -35,18 +35,20 @@ class GraphActivity : AppCompatActivity() {
         applySafeAreaInsets()
 
         if (savedInstanceState == null) {
+            val modeName = intent.getStringExtra("sensor_mode") ?: SensorMode.RAINFALL.name
+            val fragment = GraphFragment().apply {
+                arguments = Bundle().apply {
+                    putString("sensor_mode", modeName)
+                }
+            }
             supportFragmentManager.beginTransaction()
-                .replace(R.id.graphFragmentContainer, GraphFragment())
+                .replace(R.id.graphFragmentContainer, fragment)
                 .commit()
         }
     }
 
     private fun configureWindow() {
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-
-        val surfaceColor = ContextCompat.getColor(this, R.color.surface)
-        window.statusBarColor = surfaceColor
-        window.navigationBarColor = surfaceColor
+        enableEdgeToEdge()
 
         WindowInsetsControllerCompat(window, window.decorView).apply {
             isAppearanceLightStatusBars = true
@@ -56,13 +58,8 @@ class GraphActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             window.attributes = window.attributes.apply {
                 layoutInDisplayCutoutMode =
-                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_NEVER
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             }
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            window.isStatusBarContrastEnforced = false
-            window.isNavigationBarContrastEnforced = false
         }
     }
 

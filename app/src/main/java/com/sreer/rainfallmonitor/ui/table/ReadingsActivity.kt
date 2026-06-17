@@ -8,7 +8,11 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.datepicker.MaterialDatePicker
+import com.sreer.rainfallmonitor.R
 import com.sreer.rainfallmonitor.databinding.ActivityReadingsBinding
+import com.sreer.rainfallmonitor.ui.SensorMode
+import com.sreer.rainfallmonitor.ui.startBlinking
+import com.sreer.rainfallmonitor.ui.stopBlinking
 
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -30,6 +34,9 @@ class ReadingsActivity : AppCompatActivity() {
     private val viewModel: ReadingsViewModel by viewModels()
 
     private val adapter = ReadingsAdapter()
+    private val mode: SensorMode by lazy {
+        intent.getStringExtra("sensor_mode")?.let { SensorMode.valueOf(it) } ?: SensorMode.RAINFALL
+    }
     private var availableDates: List<String> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -37,6 +44,7 @@ class ReadingsActivity : AppCompatActivity() {
         binding = ActivityReadingsBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        viewModel.setMode(mode)
         setupRecyclerView()
         setupNavigation()
         observeData()
@@ -45,6 +53,7 @@ class ReadingsActivity : AppCompatActivity() {
     private fun setupRecyclerView() {
         binding.recyclerReadings.layoutManager = LinearLayoutManager(this)
         binding.recyclerReadings.adapter = adapter
+        adapter.currentMode = mode
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -110,6 +119,27 @@ class ReadingsActivity : AppCompatActivity() {
                     viewModel.allReadingsForDate.collect { readings ->
                         val currentDate = viewModel.selectedDate.value
                         val isToday = viewModel.isToday(currentDate)
+
+                        // Set title based on mode
+                        binding.textTitle.text = when (mode) {
+                            SensorMode.RAINFALL -> getString(R.string.mode_rainfall)
+                            SensorMode.TEMPERATURE -> getString(R.string.mode_temperature)
+                            SensorMode.PRESSURE -> getString(R.string.mode_pressure)
+                            SensorMode.HUMIDITY -> getString(R.string.mode_humidity)
+                        }
+
+                        // ── Title warning: blink if any T/P/H reading is null ──
+                        val hasNullReadings = mode != SensorMode.RAINFALL && readings.any { r ->
+                            when (mode) {
+                                SensorMode.TEMPERATURE -> r.temperature == null
+                                SensorMode.PRESSURE -> r.pressure == null
+                                SensorMode.HUMIDITY -> r.humidity == null
+                                else -> false
+                            }
+                        }
+                        if (hasNullReadings) binding.imgTitleWarning.startBlinking()
+                        else binding.imgTitleWarning.stopBlinking()
+
                         binding.textDateLabel.text = viewModel.formatDateForDisplay(currentDate)
                         updateNavigationButtons()
                         binding.chipToday.visibility =
@@ -122,7 +152,7 @@ class ReadingsActivity : AppCompatActivity() {
                         } else {
                             binding.recyclerReadings.visibility = android.view.View.VISIBLE
                             binding.textNoData.visibility = android.view.View.GONE
-                            val items = buildReadingsList(readings)
+                            val items = buildReadingsList(readings, mode)
                             adapter.submitList(items)
                         }
                     }

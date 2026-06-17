@@ -47,6 +47,15 @@
             android:paddingStart="8dp"
             android:text="@string/readings_activity_title" />
 
+        <ImageView
+            android:id="@+id/imgTitleWarning"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:layout_marginEnd="8dp"
+            android:src="@drawable/ic_warning"
+            android:importantForAccessibility="no"
+            android:visibility="gone" />
+
         <!-- ← Previous date -->
         <ImageButton
             android:id="@+id/btnPrevDate"

@@ -21,9 +21,18 @@
     <string name="esp32_warning_format">⚠ ESP32 may be offline — last reading was %s</string>
 
     <!-- ── Graph Preview ───────────────────────────────────────────── -->
-    <string name="graph_header_today">Today\'s Rainfall</string>
+    <string name="graph_header_today">Today\'s Graph</string>
     <string name="graph_no_data">No data yet</string>
+    <string name="graph_no_data_mode">No %1$s available</string>
     <string name="graph_fullscreen_desc">Fullscreen graph</string>
+
+    <!-- ── Mode Switcher ──────────────────────────────────────────── -->
+    <string name="mode_rainfall">Rainfall Data</string>
+    <string name="mode_temperature">Temperature Data</string>
+    <string name="mode_pressure">Pressure Data</string>
+    <string name="mode_humidity">Humidity Data</string>
+    <string name="mode_prev_desc">Previous mode</string>
+    <string name="mode_next_desc">Next mode</string>
 
     <!-- ── Readings Table ──────────────────────────────────────────── -->
     <string name="readings_header_today">Today\'s Readings</string>

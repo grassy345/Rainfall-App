@@ -33,11 +33,21 @@ interface RainfallReadingDao {
     fun getReadingsForDate(date: String): Flow<List<RainfallReading>>
 
     /**
-     * Get all distinct dates that have data.
-     * Used by the date picker to only allow navigation to dates with readings.
+     * Get distinct dates that have at least one reading (any column).
+     * Used by date navigation — includes dates where all readings for a
+     * given sensor are null (those now render null markers instead of "No data").
      */
     @Query("SELECT DISTINCT datestamp FROM rainfall_readings ORDER BY timestamp DESC")
-    fun getDatesWithData(): Flow<List<String>>
+    fun getDatesWithRainfallData(): Flow<List<String>>
+
+    @Query("SELECT DISTINCT datestamp FROM rainfall_readings ORDER BY timestamp DESC")
+    fun getDatesWithTemperatureData(): Flow<List<String>>
+
+    @Query("SELECT DISTINCT datestamp FROM rainfall_readings ORDER BY timestamp DESC")
+    fun getDatesWithPressureData(): Flow<List<String>>
+
+    @Query("SELECT DISTINCT datestamp FROM rainfall_readings ORDER BY timestamp DESC")
+    fun getDatesWithHumidityData(): Flow<List<String>>
 
     /**
      * Get the most recent reading as a reactive Flow.

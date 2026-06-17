@@ -25,11 +25,36 @@
     <color name="intensity_violent">#AB47BC</color>    <!-- Purple 400 — Violent -->
     <color name="intensity_stale">#9E9E9E</color>     <!-- Grey 500 — Stale (>15 min old) -->
 
+    <!-- ── Temperature Intensity Colors ─────────────────────────────── -->
+    <color name="temp_cool">#43A047</color>          <!-- Green 600 — ≤ 15°C -->
+    <color name="temp_mild">#1E88E5</color>          <!-- Blue 600 — 15–25°C -->
+    <color name="temp_warm">#FB8C00</color>          <!-- Orange 600 — 25–35°C -->
+    <color name="temp_hot">#E53935</color>           <!-- Red 600 — 35–40°C -->
+    <color name="temp_extreme">#B71C1C</color>       <!-- Dark Red 900 — > 40°C -->
+
+    <!-- ── Pressure Intensity Colors ────────────────────────────────── -->
+    <color name="pressure_low">#1E88E5</color>       <!-- Blue 600 — < 1000 hPa -->
+    <color name="pressure_below_normal">#00ACC1</color> <!-- Cyan 600 — 1000–1013 hPa -->
+    <color name="pressure_normal">#43A047</color>    <!-- Green 600 — 1013–1025 hPa -->
+    <color name="pressure_high">#FB8C00</color>      <!-- Orange 600 — 1025–1040 hPa -->
+    <color name="pressure_very_high">#E53935</color> <!-- Red 600 — > 1040 hPa -->
+
+    <!-- ── Humidity Intensity Colors ────────────────────────────────── -->
+    <color name="humidity_dry">#FDD835</color>       <!-- Yellow 600 — ≤ 30% -->
+    <color name="humidity_comfortable">#43A047</color> <!-- Green 600 — 30–50% -->
+    <color name="humidity_humid">#1E88E5</color>     <!-- Blue 600 — 50–70% -->
+    <color name="humidity_very_humid">#8E24AA</color> <!-- Purple 600 — 70–85% -->
+    <color name="humidity_extreme">#E53935</color>   <!-- Red 600 — > 85% -->
+
     <!-- ── Chart Colors ────────────────────────────────────────────── -->
-    <color name="chart_line">#1976D2</color>            <!-- Blue 700 -->
-    <color name="chart_fill">#331976D2</color>          <!-- Blue 700 @ 20% alpha -->
     <color name="chart_grid">#E0E0E0</color>           <!-- Grey 300 -->
     <color name="chart_label">#757575</color>           <!-- Grey 600 -->
+
+    <!-- ── Per-Mode Chart Line Colors ───────────────────────────────── -->
+    <color name="chart_line_rainfall">#1976D2</color>   <!-- Blue 700 -->
+    <color name="chart_line_temperature">#FB8C00</color> <!-- Orange 600 -->
+    <color name="chart_line_pressure">#8E24AA</color>   <!-- Purple 600 -->
+    <color name="chart_line_humidity">#00ACC1</color>   <!-- Cyan/Teal 600 -->
 
     <!-- ── Warning Banner ──────────────────────────────────────────── -->
     <color name="warning_background">#FFF3E0</color>   <!-- Orange 50 -->

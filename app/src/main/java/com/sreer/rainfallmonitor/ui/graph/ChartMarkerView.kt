@@ -7,6 +7,7 @@ import com.github.mikephil.charting.data.Entry
 import com.github.mikephil.charting.highlight.Highlight
 import com.github.mikephil.charting.utils.MPPointF
 import com.sreer.rainfallmonitor.R
+import com.sreer.rainfallmonitor.ui.SensorMode
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -36,15 +37,23 @@ class ChartMarkerView(context: Context) : MarkerView(context, R.layout.marker_vi
      */
     var midnightMs: Long = 0L
 
+    /** Sensor mode — determines which unit to show in the tooltip. */
+    var sensorMode: SensorMode = SensorMode.RAINFALL
+
     /**
      * Called by MPAndroidChart when a data point is highlighted (tapped).
-     * Populates the tooltip with the entry's time and rate values.
+     * Populates the tooltip with the entry's time and value for the current mode.
      */
     override fun refreshContent(e: Entry?, highlight: Highlight?) {
         if (e != null) {
             val absoluteMs = midnightMs + e.x.toLong()
             textTime.text = timeFormat.format(Date(absoluteMs))
-            textRate.text = String.format(Locale.US, "%.2f mm/hr", e.y)
+            textRate.text = when (sensorMode) {
+                SensorMode.RAINFALL -> String.format(Locale.US, "%.2f mm/hr", e.y)
+                SensorMode.TEMPERATURE -> String.format(Locale.US, "%.1f°C", e.y)
+                SensorMode.PRESSURE -> String.format(Locale.US, "%.1f hPa", e.y)
+                SensorMode.HUMIDITY -> String.format(Locale.US, "%.0f%%", e.y)
+            }
         }
         super.refreshContent(e, highlight)
     }

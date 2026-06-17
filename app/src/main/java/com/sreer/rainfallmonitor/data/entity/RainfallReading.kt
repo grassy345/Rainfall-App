@@ -33,9 +33,15 @@ data class RainfallReading(
     /** ESP32's NTP timestamp in milliseconds — source of truth, NOT the phone clock. */
     val timestamp: Long,
 
-    /**
-     * Date string in DD/MM/YYYY format, derived from [timestamp].
-     * Indexed for fast date-based queries (graph, date picker).
-     */
-    val datestamp: String
+    /** Date string in DD/MM/YYYY format, derived from [timestamp]. */
+    val datestamp: String,
+
+    /** Atmospheric pressure in hPa from BMP280. null if sensor failed. */
+    val pressure: Float? = null,
+
+    /** Temperature in Celsius from SHT30. null if sensor failed. */
+    val temperature: Float? = null,
+
+    /** Relative humidity in % from SHT30. null if sensor failed. */
+    val humidity: Float? = null
 )

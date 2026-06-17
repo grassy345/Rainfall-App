@@ -3,6 +3,8 @@ package com.sreer.rainfallmonitor.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.sreer.rainfallmonitor.AppConstants
+import com.sreer.rainfallmonitor.R
 import com.sreer.rainfallmonitor.data.AppDatabase
 import com.sreer.rainfallmonitor.data.entity.RainfallReading
 import com.sreer.rainfallmonitor.repository.ConnectionState
@@ -12,6 +14,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -35,11 +39,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val db = AppDatabase.getInstance(application)
     private val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.US)
 
+    // ── Sensor mode ────────────────────────────────────────────────
+    private val _sensorMode = MutableStateFlow(SensorMode.RAINFALL)
+    val sensorMode: StateFlow<SensorMode> = _sensorMode.asStateFlow()
+
+    fun setSensorMode(mode: SensorMode) {
+        _sensorMode.value = mode
+    }
+
     // ── Live data from Repository (written by MqttService) ───────────
     val hourlyRate: StateFlow<Float> = RainfallRepository.hourlyRate
     val connectionState: StateFlow<ConnectionState> = RainfallRepository.connectionState
     val lastUpdated: StateFlow<Long> = RainfallRepository.lastUpdated
     val stateStartedAt: StateFlow<Long> = RainfallRepository.stateStartedAt
+
+    // ── T/P/H live data from Repository ──────────────────────────────
+    val lastValidPressure: StateFlow<Float?> = RainfallRepository.lastValidPressure
+    val lastValidTemperature: StateFlow<Float?> = RainfallRepository.lastValidTemperature
+    val lastValidHumidity: StateFlow<Float?> = RainfallRepository.lastValidHumidity
+    val lastPressureUpdate: StateFlow<Long> = RainfallRepository.lastPressureUpdate
+    val lastTemperatureUpdate: StateFlow<Long> = RainfallRepository.lastTemperatureUpdate
+    val lastHumidityUpdate: StateFlow<Long> = RainfallRepository.lastHumidityUpdate
 
     // ── Today date tracking (auto-advances at midnight) ──────────────
 
@@ -66,9 +86,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Reactive Flow of the latest 10 readings for today, re-queries at day change. */
     val latestTodayReadings: Flow<List<RainfallReading>> =
-        _todayDate.flatMapLatest { date ->
-            db.rainfallReadingDao().getLatestReadingsForDate(date, 10)
-        }
+        combine(_todayDate, RainfallRepository.lastUpdated) { date, _ -> date }
+            .flatMapLatest { date ->
+                db.rainfallReadingDao().getLatestReadingsForDate(date, 10)
+            }
 
     /** Returns today's date in dd/MM/yyyy format (matches MqttService's datestamp). */
     fun getTodayDate(): String = dateFormat.format(Date())
@@ -137,13 +158,78 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Threshold for considering data stale (15 minutes).
-     * Matches MqttService.STALE_THRESHOLD_MS.
-     * 15 min = 1.5× the ESP32's 10-min heartbeat interval.
-     */
+    // ═══════════════════════════════════════════════════════════════════
+    // TEMPERATURE HELPERS
+    // ═══════════════════════════════════════════════════════════════════
+
+    fun getTemperatureIntensityLabel(temp: Float): String = when {
+        temp <= 15f -> "Cool"
+        temp <= 25f -> "Mild"
+        temp <= 35f -> "Warm"
+        temp <= 40f -> "Hot"
+        else -> "Extreme"
+    }
+
+    fun getTemperatureIntensityColorRes(temp: Float): Int = when {
+        temp <= 15f -> R.color.temp_cool
+        temp <= 25f -> R.color.temp_mild
+        temp <= 35f -> R.color.temp_warm
+        temp <= 40f -> R.color.temp_hot
+        else -> R.color.temp_extreme
+    }
+
+    fun formatTemperature(temp: Float): String =
+        String.format(Locale.US, "%.1f°C", temp)
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PRESSURE HELPERS
+    // ═══════════════════════════════════════════════════════════════════
+
+    fun getPressureIntensityLabel(pressure: Float): String = when {
+        pressure < 1000f -> "Low"
+        pressure < 1013f -> "Below Normal"
+        pressure < 1025f -> "Normal"
+        pressure < 1040f -> "High"
+        else -> "Very High"
+    }
+
+    fun getPressureIntensityColorRes(pressure: Float): Int = when {
+        pressure < 1000f -> R.color.pressure_low
+        pressure < 1013f -> R.color.pressure_below_normal
+        pressure < 1025f -> R.color.pressure_normal
+        pressure < 1040f -> R.color.pressure_high
+        else -> R.color.pressure_very_high
+    }
+
+    fun formatPressure(pressure: Float): String =
+        String.format(Locale.US, "%.1f hPa", pressure)
+
+    // ═══════════════════════════════════════════════════════════════════
+    // HUMIDITY HELPERS
+    // ═══════════════════════════════════════════════════════════════════
+
+    fun getHumidityIntensityLabel(humidity: Float): String = when {
+        humidity <= 30f -> "Dry"
+        humidity <= 50f -> "Comfortable"
+        humidity <= 70f -> "Humid"
+        humidity <= 85f -> "Very Humid"
+        else -> "Extreme"
+    }
+
+    fun getHumidityIntensityColorRes(humidity: Float): Int = when {
+        humidity <= 30f -> R.color.humidity_dry
+        humidity <= 50f -> R.color.humidity_comfortable
+        humidity <= 70f -> R.color.humidity_humid
+        humidity <= 85f -> R.color.humidity_very_humid
+        else -> R.color.humidity_extreme
+    }
+
+    fun formatHumidity(humidity: Float): String =
+        String.format(Locale.US, "%.0f%%", humidity)
+
     companion object {
-        private const val STALE_THRESHOLD_MS = 15 * 60 * 1000L
+        /** Staleness threshold — sourced from [AppConstants]. */
+        private val STALE_THRESHOLD_MS = AppConstants.STALE_THRESHOLD_MS
     }
 
     /**
@@ -182,9 +268,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Returns the display label for the connection state.
      */
-    fun getConnectionLabel(state: ConnectionState): String = when (state) {
+     fun getConnectionLabel(state: ConnectionState): String = when (state) {
         ConnectionState.CONNECTED -> "Connected"
         ConnectionState.CONNECTING -> "Connecting…"
         ConnectionState.OFFLINE -> "Offline"
     }
+}
+
+enum class SensorMode {
+    RAINFALL,
+    TEMPERATURE,
+    PRESSURE,
+    HUMIDITY
 }

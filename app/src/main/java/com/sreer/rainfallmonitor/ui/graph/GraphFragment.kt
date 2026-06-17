@@ -18,8 +18,11 @@ import com.github.mikephil.charting.data.LineDataSet
 import com.github.mikephil.charting.formatter.ValueFormatter
 import com.google.android.material.datepicker.MaterialDatePicker
 import com.sreer.rainfallmonitor.R
+import com.sreer.rainfallmonitor.data.entity.RainfallReading
 import com.sreer.rainfallmonitor.databinding.FragmentGraphBinding
+import com.sreer.rainfallmonitor.ui.SensorMode
 
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -57,11 +60,19 @@ class GraphFragment : Fragment() {
     /** Cached list of dates with data, for navigation. */
     private var availableDates: List<String> = emptyList()
 
+    /** Cached readings for periodic timer rebuild (BUG-001). */
+    private var cachedReadings: List<RainfallReading> = emptyList()
+
     /** Track if this is the first data load (for entry animation). */
     private var isFirstLoad = true
 
     /** MarkerView for tap-to-inspect tooltips. */
     private lateinit var markerView: ChartMarkerView
+
+    /** Sensor mode from the launching activity — determines chart field, colour, and Y-axis. */
+    private val mode: SensorMode by lazy {
+        arguments?.getString("sensor_mode")?.let { SensorMode.valueOf(it) } ?: SensorMode.RAINFALL
+    }
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -74,6 +85,7 @@ class GraphFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        viewModel.setMode(mode)
         setupChart()
         setupNavigation()
         observeData()
@@ -120,13 +132,29 @@ class GraphFragment : Fragment() {
         xAxis.textSize = 11f
         xAxis.setLabelCount(6, false)
 
-        // Y-axis (left — rate in mm/hr)
+        // Y-axis (left — unit depends on selected mode)
         val yAxis = chart.axisLeft
         yAxis.setDrawGridLines(true)
         yAxis.gridColor = ContextCompat.getColor(ctx, R.color.chart_grid)
         yAxis.textColor = ContextCompat.getColor(ctx, R.color.chart_label)
         yAxis.textSize = 11f
-        yAxis.axisMinimum = 0f
+        when (mode) {
+            SensorMode.RAINFALL -> {
+                yAxis.axisMinimum = 0f
+            }
+            SensorMode.TEMPERATURE -> {
+                yAxis.resetAxisMinimum()
+                yAxis.resetAxisMaximum()
+            }
+            SensorMode.PRESSURE -> {
+                yAxis.resetAxisMinimum()
+                yAxis.resetAxisMaximum()
+            }
+            SensorMode.HUMIDITY -> {
+                yAxis.axisMinimum = 0f
+                yAxis.axisMaximum = 100f
+            }
+        }
         yAxis.valueFormatter = object : ValueFormatter() {
             override fun getFormattedValue(value: Float): String {
                 return String.format(Locale.US, "%.1f", value)
@@ -139,6 +167,7 @@ class GraphFragment : Fragment() {
         // Set up MarkerView for tap-to-inspect tooltips
         markerView = ChartMarkerView(ctx)
         markerView.chartView = chart
+        markerView.sensorMode = mode
         chart.marker = markerView
     }
 
@@ -209,6 +238,8 @@ class GraphFragment : Fragment() {
                 // flatMapLatest has switched to the new date's query.
                 launch {
                     viewModel.readingsForDate.collect { readings ->
+                        cachedReadings = readings
+
                         val currentDate = viewModel.selectedDate.value
                         val isToday = viewModel.isToday(currentDate)
 
@@ -226,8 +257,21 @@ class GraphFragment : Fragment() {
                         markerView.midnightMs = midnightMs
 
                         // Build and render chart data
-                        viewModel.buildChartData(readings) { chartData ->
+                        viewModel.buildChartData(readings, mode) { chartData ->
                             renderChart(chartData)
+                        }
+                    }
+                }
+
+                // Periodic timer: refresh chart every 30 s when viewing today
+                // so the "Data Unavailable" gap grows in real-time (BUG-001).
+                launch {
+                    while (true) {
+                        delay(1_000)
+                        if (viewModel.isToday(viewModel.selectedDate.value) && cachedReadings.isNotEmpty()) {
+                            viewModel.buildChartData(cachedReadings, mode) { chartData ->
+                                renderChart(chartData)
+                            }
                         }
                     }
                 }
@@ -246,6 +290,12 @@ class GraphFragment : Fragment() {
 
         if (chartData.segments.isEmpty()) {
             chart.visibility = View.GONE
+            binding.textNoData.text = getString(R.string.graph_no_data_mode, when (mode) {
+                SensorMode.RAINFALL -> getString(R.string.mode_rainfall)
+                SensorMode.TEMPERATURE -> getString(R.string.mode_temperature)
+                SensorMode.PRESSURE -> getString(R.string.mode_pressure)
+                SensorMode.HUMIDITY -> getString(R.string.mode_humidity)
+            })
             binding.textNoData.visibility = View.VISIBLE
             chart.clear()
             return
@@ -254,7 +304,13 @@ class GraphFragment : Fragment() {
         chart.visibility = View.VISIBLE
         binding.textNoData.visibility = View.GONE
 
-        val lineColor = ContextCompat.getColor(ctx, R.color.chart_line)
+        val lineColorRes = when (mode) {
+            SensorMode.RAINFALL -> R.color.chart_line_rainfall
+            SensorMode.TEMPERATURE -> R.color.chart_line_temperature
+            SensorMode.PRESSURE -> R.color.chart_line_pressure
+            SensorMode.HUMIDITY -> R.color.chart_line_humidity
+        }
+        val lineColor = ContextCompat.getColor(ctx, lineColorRes)
         val highlightColor = ContextCompat.getColor(ctx, R.color.chart_label)
 
         // Each segment = one DataSet = one continuous line
@@ -285,43 +341,51 @@ class GraphFragment : Fragment() {
             }
         }
 
-        // ── Gap region hatch fills ──────────────────────────────────
-        val allDataSets = if (chartData.gapRegions.isEmpty()) {
-            segmentSets
-        } else {
-            // Compute a Y-axis max that is safely above the highest data point
-            val maxRate = chartData.segments
-                .flatMap { it.entries }
-                .maxOfOrNull { it.y } ?: 0f
-            val hatchY = maxOf(maxRate * 1.3f, 5f)
-
-            val gapSets = chartData.gapRegions.map { gap ->
-                LineDataSet(
-                    listOf(Entry(gap.xStart, hatchY), Entry(gap.xEnd, hatchY)),
-                    "Gap"
-                ).apply {
-                    setDrawFilled(true)
-                    fillColor = ContextCompat.getColor(ctx, R.color.chart_grid)
-                    fillAlpha = 80
-                    color = Color.TRANSPARENT
-                    lineWidth = 0f
-                    setDrawCircles(false)
-                    setDrawValues(false)
-                    isHighlightEnabled = false
-                }
-            }
-            segmentSets + gapSets
-        }
-
-        chart.highlightValue(null)
-        chart.data = LineData(allDataSets)
-
-        // Lock Y-axis max so gap DataSets don't push the scale up
+        // ── Compute Y-axis ceiling once (gap fills + axis clamp) ──
+        var hatchY: Float? = null
         if (chartData.gapRegions.isNotEmpty()) {
             val maxRate = chartData.segments
                 .flatMap { it.entries }
                 .maxOfOrNull { it.y } ?: 0f
-            chart.axisLeft.axisMaximum = maxOf(maxRate * 1.3f, 5f)
+            hatchY = when (mode) {
+                SensorMode.RAINFALL -> maxOf(maxRate * 1.3f, 5f)
+                SensorMode.TEMPERATURE -> maxOf(maxRate + 5f, 25f)
+                SensorMode.PRESSURE -> maxOf(maxRate + 10f, 1010f)
+                SensorMode.HUMIDITY -> 100f
+            }
+        }
+
+        // ── Gap region hatch fills ──────────────────────────────────
+        val gapSets = chartData.gapRegions.mapNotNull { gap ->
+            if (hatchY == null) return@mapNotNull null
+            LineDataSet(
+                listOf(Entry(gap.xStart, hatchY), Entry(gap.xEnd, hatchY)),
+                "Gap"
+            ).apply {
+                setDrawFilled(true)
+                fillColor = ContextCompat.getColor(ctx, R.color.chart_grid)
+                fillAlpha = 80
+                color = Color.TRANSPARENT
+                lineWidth = 0f
+                setDrawCircles(false)
+                setDrawValues(false)
+                isHighlightEnabled = false
+            }
+        }
+        val allDataSets = segmentSets + gapSets
+
+        val savedX = chart.highlighted?.firstOrNull()?.x
+        chart.data = LineData(allDataSets)
+        if (savedX != null) {
+            val segIdx = chartData.segments.indexOfFirst { seg ->
+                seg.entries.any { it.x in savedX - 1000f..savedX + 1000f }
+            }
+            if (segIdx >= 0) chart.highlightValue(savedX, segIdx)
+        }
+
+        // Lock Y-axis max so gap DataSets don't push the scale up
+        if (hatchY != null) {
+            chart.axisLeft.axisMaximum = hatchY
         }
 
         // Set X-axis range

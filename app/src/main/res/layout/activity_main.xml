@@ -62,7 +62,7 @@
                         android:orientation="vertical"
                         android:padding="20dp">
 
-                        <!-- Connection Status Row -->
+                        <!-- Top Row: Left (rainfall) + Right (T/P/H) -->
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
@@ -70,43 +70,148 @@
                             android:gravity="center_vertical"
                             android:layout_marginBottom="16dp">
 
-                            <View
-                                android:id="@+id/viewConnectionDot"
-                                android:layout_width="12dp"
-                                android:layout_height="12dp"
-                                android:background="@drawable/connection_dot"
-                                android:layout_marginEnd="8dp" />
+                            <!-- LEFT COLUMN: Connection + Intensity + Rate -->
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
 
-                            <TextView
-                                android:id="@+id/textConnectionState"
+                                <!-- Connection Status Row -->
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:orientation="horizontal"
+                                    android:gravity="center_vertical"
+                                    android:layout_marginBottom="8dp">
+
+                                    <View
+                                        android:id="@+id/viewConnectionDot"
+                                        android:layout_width="12dp"
+                                        android:layout_height="12dp"
+                                        android:background="@drawable/connection_dot"
+                                        android:layout_marginEnd="8dp"
+                                        android:importantForAccessibility="no" />
+
+                                    <TextView
+                                        android:id="@+id/textConnectionState"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:textSize="14sp"
+                                        android:textColor="@color/on_surface_secondary"
+                                        tools:text="Connected" />
+
+                                </LinearLayout>
+
+                                <!-- Intensity (large text) -->
+                                <TextView
+                                    android:id="@+id/textIntensity"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:textSize="32sp"
+                                    android:textStyle="bold"
+                                    android:textColor="@color/intensity_none"
+                                    android:layout_marginBottom="2dp"
+                                    tools:text="No Rain" />
+
+                                <!-- Hourly Rate -->
+                                <TextView
+                                    android:id="@+id/textRate"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:textSize="18sp"
+                                    android:textColor="@color/on_surface"
+                                    tools:text="0.00 mm/hr" />
+
+                            </LinearLayout>
+
+                            <!-- RIGHT COLUMN: T/P/H stacked vertically -->
+                            <LinearLayout
+                                android:id="@+id/layoutSensors"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:textSize="14sp"
-                                android:textColor="@color/on_surface_secondary"
-                                tools:text="Connected" />
+                                android:orientation="vertical"
+                                android:layout_marginStart="16dp"
+                                android:gravity="center_vertical">
+
+                                <!-- Temperature -->
+                                <LinearLayout
+                                    android:id="@+id/rowTemperature"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:orientation="horizontal"
+                                    android:gravity="center_vertical"
+                                    android:paddingVertical="6dp"
+                                    android:background="?attr/selectableItemBackground">
+                                    <ImageView
+                                        android:id="@+id/iconTemperature"
+                                        android:layout_width="18dp"
+                                        android:layout_height="18dp"
+                                        android:src="@drawable/ic_temperature"
+                                        android:layout_marginEnd="6dp"
+                                        android:importantForAccessibility="no" />
+                                    <TextView
+                                        android:id="@+id/textTemperature"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:textSize="14sp"
+                                        android:textColor="@color/on_surface_secondary"
+                                        tools:text="--" />
+                                </LinearLayout>
+
+                                <!-- Pressure -->
+                                <LinearLayout
+                                    android:id="@+id/rowPressure"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:orientation="horizontal"
+                                    android:gravity="center_vertical"
+                                    android:paddingVertical="6dp"
+                                    android:background="?attr/selectableItemBackground">
+                                    <ImageView
+                                        android:id="@+id/iconPressure"
+                                        android:layout_width="18dp"
+                                        android:layout_height="18dp"
+                                        android:src="@drawable/ic_pressure"
+                                        android:layout_marginEnd="6dp"
+                                        android:importantForAccessibility="no" />
+                                    <TextView
+                                        android:id="@+id/textPressure"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:textSize="14sp"
+                                        android:textColor="@color/on_surface_secondary"
+                                        tools:text="--" />
+                                </LinearLayout>
+
+                                <!-- Humidity -->
+                                <LinearLayout
+                                    android:id="@+id/rowHumidity"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:orientation="horizontal"
+                                    android:gravity="center_vertical"
+                                    android:paddingVertical="6dp"
+                                    android:background="?attr/selectableItemBackground">
+                                    <ImageView
+                                        android:id="@+id/iconHumidity"
+                                        android:layout_width="18dp"
+                                        android:layout_height="18dp"
+                                        android:src="@drawable/ic_humidity"
+                                        android:layout_marginEnd="6dp"
+                                        android:importantForAccessibility="no" />
+                                    <TextView
+                                        android:id="@+id/textHumidity"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:textSize="14sp"
+                                        android:textColor="@color/on_surface_secondary"
+                                        tools:text="--" />
+                                </LinearLayout>
+
+                            </LinearLayout>
 
                         </LinearLayout>
-
-                        <!-- Intensity (large text) -->
-                        <TextView
-                            android:id="@+id/textIntensity"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:textSize="32sp"
-                            android:textStyle="bold"
-                            android:textColor="@color/intensity_none"
-                            android:layout_marginBottom="4dp"
-                            tools:text="No Rain" />
-
-                        <!-- Hourly Rate -->
-                        <TextView
-                            android:id="@+id/textRate"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:textSize="18sp"
-                            android:textColor="@color/on_surface"
-                            android:layout_marginBottom="16dp"
-                            tools:text="0.00 mm/hr" />
 
                         <!-- Divider -->
                         <View
@@ -161,6 +266,52 @@
                         tools:text="⚠ ESP32 may be offline — last reading was 45 min ago" />
 
                 </com.google.android.material.card.MaterialCardView>
+
+                <!-- ═══════════════════════════════════════════════ -->
+                <!-- MODE SWITCHER                                  -->
+                <!-- ═══════════════════════════════════════════════ -->
+                <LinearLayout
+                    android:id="@+id/layoutModeSwitcher"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="16dp">
+
+                    <ImageButton
+                        android:id="@+id/btnModePrev"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:src="@drawable/ic_chevron_left"
+                        android:scaleType="centerInside"
+                        android:padding="10dp"
+                        android:contentDescription="@string/mode_prev_desc"
+                        app:tint="@color/on_surface_secondary" />
+
+                    <TextView
+                        android:id="@+id/textModeName"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/on_surface"
+                        android:text="@string/mode_rainfall" />
+
+                    <ImageButton
+                        android:id="@+id/btnModeNext"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:src="@drawable/ic_chevron_right"
+                        android:scaleType="centerInside"
+                        android:padding="10dp"
+                        android:contentDescription="@string/mode_next_desc"
+                        app:tint="@color/on_surface_secondary" />
+
+                </LinearLayout>
 
                 <!-- ═══════════════════════════════════════════════ -->
                 <!-- GRAPH PREVIEW CARD                              -->
@@ -225,6 +376,7 @@
                             android:layout_width="match_parent"
                             android:layout_height="200dp"
                             android:gravity="center"
+                            android:visibility="gone"
                             android:text="@string/graph_no_data"
                             android:textSize="16sp"
                             android:textColor="@color/on_surface_secondary" />
@@ -267,6 +419,15 @@
                                 android:textSize="16sp"
                                 android:textStyle="bold"
                                 android:textColor="@color/on_surface" />
+
+                            <ImageView
+                                android:id="@+id/imgReadingsWarning"
+                                android:layout_width="16dp"
+                                android:layout_height="16dp"
+                                android:layout_marginEnd="8dp"
+                                android:src="@drawable/ic_warning"
+                                android:importantForAccessibility="no"
+                                android:visibility="gone" />
 
                             <!-- Fullscreen button -->
                             <ImageButton

@@ -4,8 +4,8 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffColorFilter
+import androidx.core.graphics.BlendModeColorFilterCompat
+import androidx.core.graphics.BlendModeCompat
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -13,6 +13,8 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import android.view.View
+import android.widget.ImageView
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -33,13 +35,17 @@ import com.sreer.rainfallmonitor.databinding.ActivityMainBinding
 import com.sreer.rainfallmonitor.mqtt.MqttService
 import com.sreer.rainfallmonitor.repository.ConnectionState
 import com.sreer.rainfallmonitor.ui.MainViewModel
+import com.sreer.rainfallmonitor.ui.SensorMode
 import com.sreer.rainfallmonitor.ui.graph.GraphActivity
 import com.sreer.rainfallmonitor.ui.graph.GraphDataBuilder
 import com.sreer.rainfallmonitor.ui.graph.GraphViewModel
 
+import com.sreer.rainfallmonitor.ui.startBlinking
+import com.sreer.rainfallmonitor.ui.stopBlinking
 import com.sreer.rainfallmonitor.ui.table.ReadingsActivity
 import com.sreer.rainfallmonitor.ui.table.ReadingsAdapter
 import com.sreer.rainfallmonitor.ui.table.ReadingsListItem
+import com.sreer.rainfallmonitor.ui.table.buildReadingsList
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -59,6 +65,7 @@ class MainActivity : AppCompatActivity() {
         private const val TAG = "MainActivity"
         private const val PREFS_NAME = "app_prefs"
         private const val PREF_BATTERY_PROMPT_SHOWN = "battery_prompt_shown"
+        private const val MAX_PREVIEW_ITEMS = 10
     }
 
     private lateinit var binding: ActivityMainBinding
@@ -71,6 +78,12 @@ class MainActivity : AppCompatActivity() {
 
     /** Midnight timestamp for today, used as chart X-axis origin to avoid float precision loss. */
     private var midnightMs = computeMidnightMs()
+
+    /** Cached latest readings for chart updates when mode changes. */
+    private var latestReadings: List<RainfallReading> = emptyList()
+
+    /** Cached latest readings for the preview table (used to rebuild list on mode switch). */
+    private var latestPreviewReadings: List<RainfallReading> = emptyList()
 
     // ── Android 13+ notification permission request ───────────────────
     private val notificationPermissionLauncher =
@@ -112,12 +125,43 @@ class MainActivity : AppCompatActivity() {
 
         // 7. Fullscreen button -> opens landscape graph screen
         binding.btnFullscreen.setOnClickListener {
-            startActivity(Intent(this, GraphActivity::class.java))
+            val intent = Intent(this, GraphActivity::class.java).apply {
+                putExtra("sensor_mode", viewModel.sensorMode.value.name)
+            }
+            startActivity(intent)
         }
 
         // 8. Readings fullscreen button -> opens readings table
         binding.btnReadingsFullscreen.setOnClickListener {
-            startActivity(Intent(this, ReadingsActivity::class.java))
+            val intent = Intent(this, ReadingsActivity::class.java).apply {
+                putExtra("sensor_mode", viewModel.sensorMode.value.name)
+            }
+            startActivity(intent)
+        }
+
+        // 9. Mode switcher buttons
+        binding.btnModePrev.setOnClickListener {
+            val modes = SensorMode.values()
+            val currentIndex = viewModel.sensorMode.value.ordinal
+            val prevIndex = if (currentIndex == 0) modes.size - 1 else currentIndex - 1
+            viewModel.setSensorMode(modes[prevIndex])
+        }
+        binding.btnModeNext.setOnClickListener {
+            val modes = SensorMode.values()
+            val currentIndex = viewModel.sensorMode.value.ordinal
+            val nextIndex = (currentIndex + 1) % modes.size
+            viewModel.setSensorMode(modes[nextIndex])
+        }
+
+        // 10. Sensor row long-click -> intensity toast
+        binding.rowTemperature.setOnLongClickListener {
+            showIntensityToast(viewModel.lastValidTemperature.value, viewModel::getTemperatureIntensityLabel, "Temperature")
+        }
+        binding.rowPressure.setOnLongClickListener {
+            showIntensityToast(viewModel.lastValidPressure.value, viewModel::getPressureIntensityLabel, "Pressure")
+        }
+        binding.rowHumidity.setOnLongClickListener {
+            showIntensityToast(viewModel.lastValidHumidity.value, viewModel::getHumidityIntensityLabel, "Humidity")
         }
     }
 
@@ -172,17 +216,54 @@ class MainActivity : AppCompatActivity() {
                         }
                 }
 
-                // ── Graph preview (today's readings) ──────────────────
+                // ── Graph preview (today's readings + mode) ──────────
                 launch {
                     viewModel.todayReadings.collect { readings ->
-                        updateChart(readings)
+                        latestReadings = readings
+                        updateChart(readings, viewModel.sensorMode.value)
+                    }
+                }
+                launch {
+                    viewModel.sensorMode.collect { mode ->
+                        latestReadings.takeIf { it.isNotEmpty() }?.let { readings ->
+                            updateChart(readings, mode)
+                        }
                     }
                 }
 
                 // ── Readings table preview (latest 10) ────────────────
                 launch {
                     viewModel.latestTodayReadings.collect { readings ->
+                        latestPreviewReadings = readings
+                        readingsAdapter.currentMode = viewModel.sensorMode.value
                         updateReadingsPreview(readings)
+                    }
+                }
+                launch {
+                    viewModel.sensorMode.collect { mode ->
+                        readingsAdapter.currentMode = mode
+                        if (latestPreviewReadings.isNotEmpty()) {
+                            updateReadingsPreview(latestPreviewReadings)
+                        }
+                    }
+                }
+
+                // ── T/P/H sensor values (value + timestamp paired to avoid staleness race) ──
+                launch {
+                    combine(
+                        combine(viewModel.lastValidTemperature, viewModel.lastTemperatureUpdate) { v, t -> v to t },
+                        combine(viewModel.lastValidPressure, viewModel.lastPressureUpdate) { v, t -> v to t },
+                        combine(viewModel.lastValidHumidity, viewModel.lastHumidityUpdate) { v, t -> v to t }
+                    ) { t1, t2, t3 -> Triple(t1, t2, t3) }
+                    .collect { (t, p, h) ->
+                        updateSensorUI(t.first, t.second, p.first, p.second, h.first, h.second)
+                    }
+                }
+
+                // ── Sensor mode label ──────────────────────────────────
+                launch {
+                    viewModel.sensorMode.collect { mode ->
+                        updateModeUI(mode)
                     }
                 }
 
@@ -203,6 +284,29 @@ class MainActivity : AppCompatActivity() {
                         updateRateUI(rate, lastUpdated)
                         updateStateDurationUI(startedAt)
                         updateLastUpdatedUI(lastUpdated, connState)
+
+                        // Refresh T/P/H staleness
+                        updateSensorUI(
+                            viewModel.lastValidTemperature.value,
+                            viewModel.lastTemperatureUpdate.value,
+                            viewModel.lastValidPressure.value,
+                            viewModel.lastPressureUpdate.value,
+                            viewModel.lastValidHumidity.value,
+                            viewModel.lastHumidityUpdate.value
+                        )
+                    }
+                }
+
+                // ── Periodic chart refresh (every 1 second) ───────────
+                // When the ESP32 goes offline, the Room Flow stops emitting,
+                // so the chart's "Data Unavailable" gap never grows.
+                // This timer forces a rebuild with cached readings + fresh nowMs.
+                launch {
+                    while (true) {
+                        kotlinx.coroutines.delay(1_000)
+                        if (latestReadings.isNotEmpty()) {
+                            updateChart(latestReadings, viewModel.sensorMode.value)
+                        }
                     }
                 }
             }
@@ -218,7 +322,7 @@ class MainActivity : AppCompatActivity() {
         val colorRes = viewModel.getConnectionColorRes(state)
         val color = ContextCompat.getColor(this, colorRes)
         binding.viewConnectionDot.background.colorFilter =
-            PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN)
+            BlendModeColorFilterCompat.createBlendModeColorFilterCompat(color, BlendModeCompat.SRC_IN)
 
         // Update label
         binding.textConnectionState.text = viewModel.getConnectionLabel(state)
@@ -298,6 +402,77 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    // T/P/H SENSOR UI UPDATE
+    // ═══════════════════════════════════════════════════════════════════
+
+    private fun updateSensorUI(
+        temperature: Float?, temperatureUpdate: Long,
+        pressure: Float?, pressureUpdate: Long,
+        humidity: Float?, humidityUpdate: Long
+    ) {
+        updateSensorItem(
+            value = temperature,
+            textView = binding.textTemperature,
+            iconView = binding.iconTemperature,
+            formatFn = viewModel::formatTemperature,
+            colorFn = viewModel::getTemperatureIntensityColorRes,
+            stalenessFn = { viewModel.isDataStale(temperatureUpdate) }
+        )
+        updateSensorItem(
+            value = pressure,
+            textView = binding.textPressure,
+            iconView = binding.iconPressure,
+            formatFn = viewModel::formatPressure,
+            colorFn = viewModel::getPressureIntensityColorRes,
+            stalenessFn = { viewModel.isDataStale(pressureUpdate) }
+        )
+        updateSensorItem(
+            value = humidity,
+            textView = binding.textHumidity,
+            iconView = binding.iconHumidity,
+            formatFn = viewModel::formatHumidity,
+            colorFn = viewModel::getHumidityIntensityColorRes,
+            stalenessFn = { viewModel.isDataStale(humidityUpdate) }
+        )
+    }
+
+    private fun updateSensorItem(
+        value: Float?,
+        textView: TextView,
+        iconView: ImageView,
+        formatFn: (Float) -> String,
+        colorFn: (Float) -> Int,
+        stalenessFn: () -> Boolean
+    ) {
+        if (value != null) {
+            textView.text = formatFn(value)
+            val isStale = stalenessFn()
+            val colorRes = if (isStale) R.color.intensity_stale else colorFn(value)
+            val color = ContextCompat.getColor(this, colorRes)
+            textView.setTextColor(color)
+            iconView.colorFilter = BlendModeColorFilterCompat.createBlendModeColorFilterCompat(color, BlendModeCompat.SRC_IN)
+        } else {
+            textView.text = "--"
+            val secondaryColor = ContextCompat.getColor(this, R.color.on_surface_secondary)
+            textView.setTextColor(secondaryColor)
+            iconView.colorFilter = BlendModeColorFilterCompat.createBlendModeColorFilterCompat(secondaryColor, BlendModeCompat.SRC_IN)
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // MODE SWITCHER
+    // ═══════════════════════════════════════════════════════════════════
+
+    private fun updateModeUI(mode: SensorMode) {
+        binding.textModeName.text = when (mode) {
+            SensorMode.RAINFALL -> getString(R.string.mode_rainfall)
+            SensorMode.TEMPERATURE -> getString(R.string.mode_temperature)
+            SensorMode.PRESSURE -> getString(R.string.mode_pressure)
+            SensorMode.HUMIDITY -> getString(R.string.mode_humidity)
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     // READINGS PREVIEW SETUP
     // ═══════════════════════════════════════════════════════════════════
 
@@ -310,6 +485,13 @@ class MainActivity : AppCompatActivity() {
     // ═══════════════════════════════════════════════════════════════════
     // CHART SETUP & UPDATE
     // ═══════════════════════════════════════════════════════════════════
+
+    private fun getChartLineColorRes(mode: SensorMode): Int = when (mode) {
+        SensorMode.RAINFALL -> R.color.chart_line_rainfall
+        SensorMode.TEMPERATURE -> R.color.chart_line_temperature
+        SensorMode.PRESSURE -> R.color.chart_line_pressure
+        SensorMode.HUMIDITY -> R.color.chart_line_humidity
+    }
 
     /**
      * Configures the MPAndroidChart LineChart for the preview.
@@ -340,13 +522,12 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Y-axis (left — rate in mm/hr)
+        // Y-axis (left — unit depends on selected mode, set in renderPreviewChart)
         val yAxis = chart.axisLeft
         yAxis.setDrawGridLines(true)
         yAxis.gridColor = ContextCompat.getColor(this, R.color.chart_grid)
         yAxis.textColor = ContextCompat.getColor(this, R.color.chart_label)
         yAxis.textSize = 10f
-        yAxis.axisMinimum = 0f
         yAxis.valueFormatter = object : ValueFormatter() {
             override fun getFormattedValue(value: Float): String {
                 return String.format(Locale.US, "%.1f", value)
@@ -358,13 +539,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Updates the chart with today's readings.
+     * Updates the chart with today's readings and the current sensor mode.
      *
      * Uses [GraphDataBuilder] for gap detection, midnight boundary
      * handling, and live edge extension. Each continuous segment
      * becomes a separate DataSet so gaps appear as visual breaks.
      */
-    private fun updateChart(readings: List<RainfallReading>) {
+    private fun updateChart(readings: List<RainfallReading>, mode: SensorMode) {
         val chart = binding.chartPreview
 
         if (readings.isEmpty()) {
@@ -381,8 +562,8 @@ class MainActivity : AppCompatActivity() {
         midnightMs = computeMidnightMs()
 
         // Build chart data with gap detection via GraphDataBuilder
-        graphViewModel.buildChartData(readings) { chartData ->
-            renderPreviewChart(chart, chartData)
+        graphViewModel.buildChartData(readings, mode) { chartData ->
+            renderPreviewChart(chart, chartData, mode)
         }
     }
 
@@ -390,17 +571,33 @@ class MainActivity : AppCompatActivity() {
      * Renders segmented chart data on the preview chart.
      * Each segment = one continuous line. Gaps = visual breaks.
      */
-    private fun renderPreviewChart(chart: LineChart, chartData: GraphDataBuilder.ChartData) {
+    private fun renderPreviewChart(
+        chart: LineChart,
+        chartData: GraphDataBuilder.ChartData,
+        mode: SensorMode
+    ) {
         if (chartData.segments.isEmpty()) {
             chart.clear()
+            chart.visibility = View.GONE
+            binding.textGraphNoData.visibility = View.VISIBLE
+            binding.textGraphNoData.text = getString(R.string.graph_no_data_mode, when (mode) {
+                SensorMode.RAINFALL -> getString(R.string.mode_rainfall)
+                SensorMode.TEMPERATURE -> getString(R.string.mode_temperature)
+                SensorMode.PRESSURE -> getString(R.string.mode_pressure)
+                SensorMode.HUMIDITY -> getString(R.string.mode_humidity)
+            })
             return
         }
 
-        val lineColor = ContextCompat.getColor(this, R.color.chart_line)
+        chart.visibility = View.VISIBLE
+        binding.textGraphNoData.visibility = View.GONE
+
+        val lineColorRes = getChartLineColorRes(mode)
+        val lineColor = ContextCompat.getColor(this, lineColorRes)
 
         val segmentSets = chartData.segments.mapIndexed { index, segment ->
             LineDataSet(segment.entries, "Segment $index").apply {
-                mode = LineDataSet.Mode.STEPPED
+                this.mode = LineDataSet.Mode.STEPPED
                 color = lineColor
                 lineWidth = 2f
                 setDrawValues(false)
@@ -419,17 +616,24 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // ── Gap region hatch fills ──────────────────────────────────
-        val allDataSets = if (chartData.gapRegions.isEmpty()) {
-            segmentSets
-        } else {
+        // ── Compute Y-axis ceiling once (gap fills + axis clamp) ──
+        var hatchY: Float? = null
+        if (chartData.gapRegions.isNotEmpty()) {
             val maxRate = chartData.segments
                 .flatMap { it.entries }
                 .maxOfOrNull { it.y } ?: 0f
-            val hatchY = maxOf(maxRate * 1.3f, 5f)
+            hatchY = when (mode) {
+                SensorMode.RAINFALL -> maxOf(maxRate * 1.3f, 5f)
+                SensorMode.TEMPERATURE -> maxOf(maxRate + 5f, 25f)
+                SensorMode.PRESSURE -> maxOf(maxRate + 10f, 1010f)
+                SensorMode.HUMIDITY -> 100f
+            }
+        }
 
+        // ── Gap region hatch fills ──────────────────────────────────
+        val gapSets = if (hatchY == null) emptyList() else {
             val ctx = this
-            val gapSets = chartData.gapRegions.map { gap ->
+            chartData.gapRegions.map { gap ->
                 LineDataSet(
                     listOf(Entry(gap.xStart, hatchY), Entry(gap.xEnd, hatchY)),
                     "Gap"
@@ -444,17 +648,35 @@ class MainActivity : AppCompatActivity() {
                     isHighlightEnabled = false
                 }
             }
-            segmentSets + gapSets
+        }
+        val allDataSets = segmentSets + gapSets
+
+        // ── Configure Y-axis for current mode ───────────────────────
+        val yAxis = chart.axisLeft
+        when (mode) {
+            SensorMode.RAINFALL -> {
+                yAxis.axisMinimum = 0f
+                yAxis.resetAxisMaximum()
+            }
+            SensorMode.TEMPERATURE -> {
+                yAxis.resetAxisMinimum()
+                yAxis.resetAxisMaximum()
+            }
+            SensorMode.PRESSURE -> {
+                yAxis.resetAxisMinimum()
+                yAxis.resetAxisMaximum()
+            }
+            SensorMode.HUMIDITY -> {
+                yAxis.axisMinimum = 0f
+                yAxis.axisMaximum = 100f
+            }
         }
 
         chart.data = LineData(allDataSets)
 
-        // Lock Y-axis max so gap DataSets don't push the scale up
-        if (chartData.gapRegions.isNotEmpty()) {
-            val maxRate = chartData.segments
-                .flatMap { it.entries }
-                .maxOfOrNull { it.y } ?: 0f
-            chart.axisLeft.axisMaximum = maxOf(maxRate * 1.3f, 5f)
+        // Clamp Y-axis max when gap regions are present
+        if (hatchY != null) {
+            chart.axisLeft.axisMaximum = maxOf(hatchY, chart.yMax)
         }
 
         // Set X-axis range: midnight to now (today)
@@ -470,6 +692,19 @@ class MainActivity : AppCompatActivity() {
     // ═══════════════════════════════════════════════════════════════════
 
     private fun updateReadingsPreview(readings: List<RainfallReading>) {
+        val mode = viewModel.sensorMode.value
+        // ── Title warning: blink if any T/P/H reading is null ───────
+        val hasNullReadings = mode != SensorMode.RAINFALL && readings.any { r ->
+            when (mode) {
+                SensorMode.TEMPERATURE -> r.temperature == null
+                SensorMode.PRESSURE -> r.pressure == null
+                SensorMode.HUMIDITY -> r.humidity == null
+                else -> false
+            }
+        }
+        if (hasNullReadings) binding.imgReadingsWarning.startBlinking()
+        else binding.imgReadingsWarning.stopBlinking()
+
         if (readings.isEmpty()) {
             binding.recyclerReadingsPreview.visibility = View.GONE
             binding.textReadingsNoData.visibility = View.VISIBLE
@@ -479,7 +714,32 @@ class MainActivity : AppCompatActivity() {
 
         binding.recyclerReadingsPreview.visibility = View.VISIBLE
         binding.textReadingsNoData.visibility = View.GONE
-        readingsAdapter.submitList(readings.map { ReadingsListItem.Reading(it) })
+        val items = buildReadingsList(readings, mode)
+        readingsAdapter.submitList(items)
+
+        // Compute height using per-type heights, showing up to MAX_PREVIEW_ITEMS
+        // reading rows plus any gap rows that fall between them.
+        val readingHeightPx = (48 * resources.displayMetrics.density).toInt()
+        val gapHeightPx = (32 * resources.displayMetrics.density).toInt()
+        val visibleItems = mutableListOf<ReadingsListItem>()
+        var readingCount = 0
+        for (item in items) {
+            visibleItems.add(item)
+            if (item is ReadingsListItem.Reading) {
+                readingCount++
+                if (readingCount >= MAX_PREVIEW_ITEMS) break
+            }
+        }
+        val totalHeight = visibleItems.sumOf { item ->
+            when (item) {
+                is ReadingsListItem.Reading -> readingHeightPx
+                is ReadingsListItem.Gap -> gapHeightPx
+            }
+        }
+        if (binding.recyclerReadingsPreview.layoutParams.height != totalHeight) {
+            binding.recyclerReadingsPreview.layoutParams.height = totalHeight
+            binding.recyclerReadingsPreview.requestLayout()
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -595,5 +855,11 @@ class MainActivity : AppCompatActivity() {
             }
             .setCancelable(false)
             .show()
+    }
+
+    private fun showIntensityToast(value: Float?, labelFn: (Float) -> String, sensorName: String): Boolean {
+        if (value == null) return false
+        Toast.makeText(this, "$sensorName: ${labelFn(value)}", Toast.LENGTH_SHORT).show()
+        return true
     }
 }

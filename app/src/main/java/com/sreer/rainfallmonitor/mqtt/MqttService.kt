@@ -23,6 +23,7 @@ import com.sreer.rainfallmonitor.BuildConfig
 import com.sreer.rainfallmonitor.MainActivity
 import com.sreer.rainfallmonitor.R
 import com.sreer.rainfallmonitor.RainfallApp
+import com.sreer.rainfallmonitor.AppConstants
 import com.sreer.rainfallmonitor.data.AppDatabase
 import com.sreer.rainfallmonitor.data.entity.RainfallReading
 import com.sreer.rainfallmonitor.repository.ConnectionState
@@ -33,11 +34,12 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.future.await
 import kotlinx.coroutines.launch
 import org.json.JSONObject
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlin.math.min
@@ -68,11 +70,11 @@ class MqttService : Service() {
         private const val PREF_ESP32_OFFLINE_NOTIFIED = "esp32_offline_notified"
 
         /**
-         * Messages older than this are considered stale.
+         * Data staleness threshold — sourced from [AppConstants].
          * 15 min = 1.5× the ESP32's 10-min heartbeat interval.
          * Also used as the gap detection threshold for "Since X ago".
          */
-        private const val STALE_THRESHOLD_MS = 15 * 60 * 1000L // 15 minutes
+        private val STALE_THRESHOLD_MS = AppConstants.STALE_THRESHOLD_MS
 
         /** Backoff timing constants. */
         private const val INITIAL_BACKOFF_MS = 2_000L
@@ -132,7 +134,7 @@ class MqttService : Service() {
     private lateinit var mqttClient: Mqtt5AsyncClient
     private var connectJob: Job? = null
     private var monitorJob: Job? = null
-    private var currentBackoff = INITIAL_BACKOFF_MS
+    @Volatile private var currentBackoff = INITIAL_BACKOFF_MS
     @Volatile private var isReconnecting = false
 
     // ── Network monitoring ────────────────────────────────────────────
@@ -143,7 +145,7 @@ class MqttService : Service() {
     // ── Database & preferences ────────────────────────────────────────
     private lateinit var db: AppDatabase
     private lateinit var prefs: SharedPreferences
-    private val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.US)
+    private val dateFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy").withZone(ZoneId.systemDefault())
 
     // ═══════════════════════════════════════════════════════════════════
     // LIFECYCLE
@@ -170,8 +172,19 @@ class MqttService : Service() {
                     // the Repository BEFORE this DB read finishes, and then
                     // the bootstrap overwrites the fresh value with an older one.
                     if (RainfallRepository.lastUpdated.value == 0L) {
-                        RainfallRepository.updateReading(latest.hourlyRate, latest.timestamp)
-                        Log.i(TAG, "Bootstrapped Repository from DB: rate=${latest.hourlyRate}, time=${latest.timestamp}")
+                        if (!RainfallRepository.updateReading(
+                                rate = latest.hourlyRate,
+                                timestamp = latest.timestamp,
+                                hasDataGap = false,
+                                pressure = latest.pressure,
+                                temperature = latest.temperature,
+                                humidity = latest.humidity
+                            )
+                        ) {
+                            Log.w(TAG, "Bootstrap reading rejected (stale/duplicate)")
+                        } else {
+                            Log.i(TAG, "Bootstrapped Repository from DB: rate=${latest.hourlyRate}, time=${latest.timestamp}, pressure=${latest.pressure}, temp=${latest.temperature}, hum=${latest.humidity}")
+                        }
                     } else {
                         Log.d(TAG, "Skipping bootstrap — fresh data already in Repository")
                     }
@@ -203,6 +216,12 @@ class MqttService : Service() {
             .serverHost(BuildConfig.MQTT_BROKER_HOST)
             .serverPort(BuildConfig.MQTT_BROKER_PORT)
             .sslWithDefaultConfig()
+            .addDisconnectedListener {
+                Log.w(TAG, "Disconnected listener fired — updating state")
+                RainfallRepository.updateConnectionState(ConnectionState.OFFLINE)
+                updateNotification("Connection lost — reconnecting...")
+                attemptConnection()
+            }
             .buildAsync()
         Log.i(TAG, "MQTT client built with ID: $clientId")
 
@@ -467,7 +486,7 @@ class MqttService : Service() {
                     .sessionExpiryInterval(SESSION_EXPIRY_SECONDS)
                     .keepAlive(KEEPALIVE_SECONDS)
                     .send()
-                    .get() // Block until connected (we're on Dispatchers.IO)
+                    .await() // Suspend until connected (cancellable)
 
                 // ── SUCCESS ───────────────────────────────────────
                 Log.i(TAG, "MQTT connected!")
@@ -517,6 +536,8 @@ class MqttService : Service() {
             .whenComplete { _, error ->
                 if (error != null) {
                     Log.e(TAG, "Subscribe failed: ${error.message}")
+                    RainfallRepository.updateConnectionState(ConnectionState.OFFLINE)
+                    forceReconnect()
                 } else {
                     Log.i(TAG, "Subscribed to $topic")
                 }
@@ -586,16 +607,24 @@ class MqttService : Service() {
             val timestamp = json.getLong("timestamp")
 
             // Derive datestamp from ESP32 timestamp
-            val datestamp = dateFormat.format(Date(timestamp))
+            val datestamp = dateFormatter.format(Instant.ofEpochMilli(timestamp))
+
+            // Extract pressure, temperature, humidity (ESP32 sends null on sensor failure)
+            val pressure = json.optDouble("pressure", Double.NaN).let { if (it.isNaN()) null else it.toFloat() }
+            val temperature = json.optDouble("temperature", Double.NaN).let { if (it.isNaN()) null else it.toFloat() }
+            val humidity = json.optDouble("humidity", Double.NaN).let { if (it.isNaN()) null else it.toFloat() }
 
             // 1. Save to Room DB (ALWAYS — stale or not)
             val reading = RainfallReading(
                 hourlyRate = rate,
                 timestamp = timestamp,
-                datestamp = datestamp
+                datestamp = datestamp,
+                pressure = pressure,
+                temperature = temperature,
+                humidity = humidity
             )
             db.rainfallReadingDao().insert(reading)
-            Log.d(TAG, "Saved reading: rate=$rate, time=$timestamp, date=$datestamp")
+            Log.d(TAG, "Saved reading: rate=$rate, pressure=$pressure, temp=$temperature, hum=$humidity, time=$timestamp, date=$datestamp")
 
             // 2. Stale message check
             val now = System.currentTimeMillis()
@@ -623,7 +652,17 @@ class MqttService : Service() {
             }
 
             // 4. Update Repository StateFlows (FRESH messages only)
-            RainfallRepository.updateReading(rate, timestamp, hasDataGap)
+            val accepted = RainfallRepository.updateReading(
+                rate = rate,
+                timestamp = timestamp,
+                hasDataGap = hasDataGap,
+                pressure = pressure,
+                temperature = temperature,
+                humidity = humidity
+            )
+            if (!accepted) {
+                Log.w(TAG, "MQTT message rejected (stale/duplicate): rate=$rate, ts=$timestamp")
+            }
 
             // 5. Clear ESP32 offline state — we just got fresh data!
             // Dismiss any showing notification and reset the anti-spam flag

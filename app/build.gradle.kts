@@ -97,6 +97,7 @@ dependencies {
 
     // ── Coroutines ────────────────────────────────────────────────────
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-jdk8:1.10.2")
 
     // ── MQTT (HiveMQ Client v5) ───────────────────────────────────────
     implementation("com.hivemq:hivemq-mqtt-client:1.3.7")
