@@ -34,6 +34,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.future.await
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -69,6 +70,18 @@ class MqttService : Service() {
         private const val PREF_LAST_RATE = "last_rate"
         private const val PREF_ESP32_OFFLINE_NOTIFIED = "esp32_offline_notified"
 
+        // ── Persisted consecutive-null tracking ───────────────────────
+        private const val PREF_PRESSURE_NULL_COUNT = "pressure_null_count"
+        private const val PREF_TEMP_NULL_COUNT = "temp_null_count"
+        private const val PREF_HUMIDITY_NULL_COUNT = "humidity_null_count"
+        private const val PREF_PRESSURE_ACKED = "pressure_acked"
+        private const val PREF_TEMP_ACKED = "temp_acked"
+        private const val PREF_HUMIDITY_ACKED = "humidity_acked"
+        private const val PREF_LAST_FRESH_TS = "last_fresh_timestamp"
+
+        /** Intent action for the sensor failure acknowledge button. */
+        const val ACTION_ACKNOWLEDGE_FAILURE = "com.sreer.rainfallmonitor.ACTION_ACK_FAILURE"
+
         /**
          * Data staleness threshold — sourced from [AppConstants].
          * 15 min = 1.5× the ESP32's 10-min heartbeat interval.
@@ -95,6 +108,13 @@ class MqttService : Service() {
 
         /** Intent action for re-posting the foreground notification. */
         const val ACTION_REPOST_NOTIFICATION = "com.sreer.rainfallmonitor.ACTION_REPOST"
+
+        /** Maps internal sensor keys to user-facing display names. */
+        private val SENSOR_DISPLAY_NAMES = mapOf(
+            "pressure" to "Pressure",
+            "temperature" to "Temperature",
+            "humidity" to "Humidity"
+        )
 
         /**
          * Schedules the watchdog alarm to fire in ~15 minutes.
@@ -147,6 +167,17 @@ class MqttService : Service() {
     private lateinit var prefs: SharedPreferences
     private val dateFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy").withZone(ZoneId.systemDefault())
 
+    // ── Sensor failure notification lock ──────────────────────────────
+    // Synchronises access to notification posting and acknowledge handling.
+    // The acknowledge state is persisted in SharedPrefs and checked
+    // directly rather than cached in a Boolean field.
+    private val notificationLock = Any()
+
+    /** One-shot guard: becomes true after the first alert with sound fires
+     *  for the current failure episode. Prevents re-sound on every heartbeat.
+     *  Reset on acknowledge, full recovery, disconnect, or startup. */
+    @Volatile private var alertPostedForEpisode = false
+
     // ═══════════════════════════════════════════════════════════════════
     // LIFECYCLE
     // ═══════════════════════════════════════════════════════════════════
@@ -158,6 +189,38 @@ class MqttService : Service() {
         db = AppDatabase.getInstance(applicationContext)
         prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         connectivityManager = getSystemService(ConnectivityManager::class.java)
+
+        // Restore consecutive-null tracking from SharedPrefs — survives restarts
+        RainfallRepository.initConsecutiveNullCounts(
+            prefs.getInt(PREF_PRESSURE_NULL_COUNT, 0),
+            prefs.getInt(PREF_TEMP_NULL_COUNT, 0),
+            prefs.getInt(PREF_HUMIDITY_NULL_COUNT, 0)
+        )
+        val lastFreshTs = prefs.getLong(PREF_LAST_FRESH_TS, 0L)
+        if (lastFreshTs > 0L) {
+            RainfallRepository.initLastFreshTimestamp(lastFreshTs)
+        }
+
+        // ── Startup notification re-post ──────────────────────────
+        // After a reboot, Android clears all notifications. If any sensor
+        // was failing before the restart, re-post the notification now so
+        // the user isn't left uninformed.
+        val startupFailing = listOf(
+            "pressure" to prefs.getInt(PREF_PRESSURE_NULL_COUNT, 0),
+            "temperature" to prefs.getInt(PREF_TEMP_NULL_COUNT, 0),
+            "humidity" to prefs.getInt(PREF_HUMIDITY_NULL_COUNT, 0)
+        ).filter { it.second >= 2 }
+        if (startupFailing.isNotEmpty()) {
+            // Always silent re-post — the user saw this before reboot.
+            // Using the ALERT channel would play sound even with forceSound=false
+            // because notify() on a HIGH-importance channel with no existing
+            // notification to update is treated as a fresh post.
+            val pairs = startupFailing.map { Pair(SENSOR_DISPLAY_NAMES[it.first]!!, it.second) }
+            com.sreer.rainfallmonitor.notification.NotificationHelper
+                .showSensorFailureSilent(this, pairs)
+            alertPostedForEpisode = true
+            Log.i(TAG, "Re-posted sensor failure notification from persisted state: ${startupFailing}")
+        }
 
         // Bootstrap Repository from DB — populates the dashboard with the
         // last known state BEFORE any MQTT messages arrive. Without this,
@@ -172,19 +235,26 @@ class MqttService : Service() {
                     // the Repository BEFORE this DB read finishes, and then
                     // the bootstrap overwrites the fresh value with an older one.
                     if (RainfallRepository.lastUpdated.value == 0L) {
-                        if (!RainfallRepository.updateReading(
-                                rate = latest.hourlyRate,
-                                timestamp = latest.timestamp,
-                                hasDataGap = false,
-                                pressure = latest.pressure,
-                                temperature = latest.temperature,
-                                humidity = latest.humidity
+                        // Process all readings for this datestamp chronologically
+                        // so the Repository correctly determines stateStartedAt
+                        // from the actual state transition history, rather than
+                        // just the latest reading.
+                        val readings = db.rainfallReadingDao()
+                            .getReadingsForDateOnce(latest.datestamp)
+                        var acceptedCount = 0
+                        for (reading in readings) {
+                            val result = RainfallRepository.updateReading(
+                                rate = reading.hourlyRate,
+                                timestamp = reading.timestamp,
+                                hasDataGap = true,
+                                isStale = true,
+                                pressure = reading.pressure,
+                                temperature = reading.temperature,
+                                humidity = reading.humidity
                             )
-                        ) {
-                            Log.w(TAG, "Bootstrap reading rejected (stale/duplicate)")
-                        } else {
-                            Log.i(TAG, "Bootstrapped Repository from DB: rate=${latest.hourlyRate}, time=${latest.timestamp}, pressure=${latest.pressure}, temp=${latest.temperature}, hum=${latest.humidity}")
+                            if (result.accepted) acceptedCount++
                         }
+                        Log.i(TAG, "Bootstrapped $acceptedCount/${readings.size} readings from DB")
                     } else {
                         Log.d(TAG, "Skipping bootstrap — fresh data already in Repository")
                     }
@@ -282,6 +352,34 @@ class MqttService : Service() {
             }
         }
 
+        // On disconnect, dismiss any sensor failure notification that has
+        // NOT been acknowledged by the user. Acknowledged ones stay
+        // dismissed (silent) and don't reappear until the next reconnect.
+        // Also resets the one-shot sound flag so a new failure after
+        // reconnect plays an alert sound.
+        serviceScope.launch {
+            // Track whether we have ever been CONNECTED — only dismiss
+            // unacknowledged notifications on disconnection AFTER the
+            // connection was established, not during initial startup.
+            var wasConnected = false
+            RainfallRepository.connectionState.collect { state ->
+                if (state == ConnectionState.CONNECTED) {
+                    wasConnected = true
+                } else if (wasConnected) {
+                    synchronized(notificationLock) {
+                        val sensors = listOf("pressure", "temperature", "humidity")
+                        val unacked = sensors.filter { !isSensorAcknowledged(it) }
+                        if (unacked.isNotEmpty()) {
+                            com.sreer.rainfallmonitor.notification.NotificationHelper
+                                .dismissSensorFailureAlert(this@MqttService)
+                            alertPostedForEpisode = false
+                            Log.i(TAG, "Connection lost — dismissed unacknowledged sensor failure notification for ${unacked}")
+                        }
+                    }
+                }
+            }
+        }
+
         // Start initial connection attempt (Layer 1)
         attemptConnection()
     }
@@ -289,17 +387,25 @@ class MqttService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.i(TAG, "onStartCommand called (flags=$flags, startId=$startId)")
 
-        // Handle notification re-post request (from NotificationDismissReceiver)
-        if (intent?.action == ACTION_REPOST_NOTIFICATION) {
-            Log.w(TAG, "Re-posting foreground notification after dismiss")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                startForeground(
-                    NOTIFICATION_ID,
-                    buildNotification("Connected"),
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-                )
-            } else {
-                startForeground(NOTIFICATION_ID, buildNotification("Connected"))
+        when (intent?.action) {
+            // Handle notification re-post request (from NotificationDismissReceiver)
+            ACTION_REPOST_NOTIFICATION -> {
+                Log.w(TAG, "Re-posting foreground notification after dismiss")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    startForeground(
+                        NOTIFICATION_ID,
+                        buildNotification("Connected"),
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                    )
+                } else {
+                    startForeground(NOTIFICATION_ID, buildNotification("Connected"))
+                }
+            }
+
+            // Handle sensor failure acknowledge button
+            ACTION_ACKNOWLEDGE_FAILURE -> {
+                Log.i(TAG, "Sensor failure acknowledged via notification action")
+                handleAcknowledge()
             }
         }
 
@@ -591,14 +697,19 @@ class MqttService : Service() {
      * Processes an incoming MQTT message from the ESP32.
      *
      * Pipeline:
-     *   1. Parse JSON → extract rate + timestamp
-     *   2. Save to Room DB (ALWAYS, even stale — for historical record)
-     *   3. Check stale (> 15 min) — if stale, return early (DB only)
-     *   4. Detect data gap — if gap > 15 min since last reading,
-     *      flag it so Repository resets "Since X ago"
-     *   5. Update Repository StateFlows (FRESH messages only)
-     *   6. Clear ESP32 offline notification (fresh data = ESP32 alive)
-     *   7. Check rain transition — fire notification if applicable
+     *   1. Parse JSON → extract rate + timestamp + sensor values
+     *   2. Save to Room DB (ALWAYS — every message is a historical record)
+     *   3. Compute staleness — stale messages still update the dashboard
+     *      (with grey [S] styling), but do NOT trigger notifications
+     *   4. Detect data gap — if gap > 15 min between ESP32 timestamps,
+     *      flag it so the Repository resets "Since X ago"
+     *   5. Update Repository — BOTH fresh AND stale messages update the
+     *      display (dashboard values, timestamps, rain state). Fresh messages
+     *      also update the consecutive-null tracking for Feature 1.
+     *   6. Clear ESP32 offline notification (fresh data only)
+     *   7. Sensor failure detection — check if any sensor has 2 consecutive
+     *      nulls among fresh messages (Feature 1)
+     *   8. Rain transition detection (fresh messages only)
      */
     private suspend fun processMessage(payload: String) {
         try {
@@ -626,24 +737,21 @@ class MqttService : Service() {
             db.rainfallReadingDao().insert(reading)
             Log.d(TAG, "Saved reading: rate=$rate, pressure=$pressure, temp=$temperature, hum=$humidity, time=$timestamp, date=$datestamp")
 
-            // 2. Stale message check
+            // 2. Stale message check — compute staleness but do NOT return early.
+            //    Stale messages update the dashboard (grey [S] styling) but
+            //    do NOT trigger any notifications.
             val now = System.currentTimeMillis()
             val messageAge = now - timestamp
             val isStale = messageAge > STALE_THRESHOLD_MS
 
             if (isStale) {
-                Log.d(TAG, "Stale message (${messageAge / 60000}min old) — saved to DB only")
-                // Saved to DB for historical record, but do NOT update
-                // the repository (dashboard) or fire notifications.
-                // This prevents the UI from showing old data like
-                // "Heavy Rain" from 2 hours ago on first connect.
-                return
+                Log.d(TAG, "Stale message (${messageAge / 60000}min old) — updating dashboard with stale marker")
             }
 
             // 3. Detect data gap — if the time since the last Repository
-            // update exceeds the stale threshold, we can't claim the
-            // current rain/no-rain state has been continuous. It might
-            // have rained (or stopped) during the gap.
+            //    update exceeds the stale threshold, we can't claim the
+            //    current rain/no-rain state has been continuous. It might
+            //    have rained (or stopped) during the gap.
             val lastKnownTimestamp = RainfallRepository.lastUpdated.value
             val hasDataGap = lastKnownTimestamp != 0L &&
                     (timestamp - lastKnownTimestamp) > STALE_THRESHOLD_MS
@@ -651,22 +759,28 @@ class MqttService : Service() {
                 Log.i(TAG, "Data gap detected: ${(timestamp - lastKnownTimestamp) / 60000}min since last reading")
             }
 
-            // 4. Update Repository StateFlows (FRESH messages only)
-            val accepted = RainfallRepository.updateReading(
+            // 4. Update Repository — BOTH fresh AND stale messages update
+            //    dashboard display values. Only fresh messages change the
+            //    consecutive-null tracking (isStale flag guards this).
+            val result = RainfallRepository.updateReading(
                 rate = rate,
                 timestamp = timestamp,
                 hasDataGap = hasDataGap,
+                isStale = isStale,
                 pressure = pressure,
                 temperature = temperature,
                 humidity = humidity
             )
-            if (!accepted) {
+            if (!result.accepted) {
                 Log.w(TAG, "MQTT message rejected (stale/duplicate): rate=$rate, ts=$timestamp")
             }
 
+            // ── Everything below here is for FRESH messages only ──────
+            if (isStale) return
+
             // 5. Clear ESP32 offline state — we just got fresh data!
-            // Dismiss any showing notification and reset the anti-spam flag
-            // so the next offline event triggers a new notification.
+            //    Dismiss any showing notification and reset the anti-spam flag
+            //    so the next offline event triggers a new notification.
             if (prefs.getBoolean(PREF_ESP32_OFFLINE_NOTIFIED, false)) {
                 prefs.edit().putBoolean(PREF_ESP32_OFFLINE_NOTIFIED, false).apply()
                 com.sreer.rainfallmonitor.notification.NotificationHelper
@@ -674,7 +788,93 @@ class MqttService : Service() {
                 Log.i(TAG, "ESP32 back online — dismissed offline notification")
             }
 
-            // 6. Rain transition detection (fresh messages only)
+            // 6. Sensor failure detection — check consecutive null
+            //    counts from the UpdateResult (snapshotted inside the
+            //    synchronized updateReading call).
+            //    A count >= 2 means the sensor has failed.
+            //    Uses display names (capitalized) for the notification body.
+            //    Handles race ordering: recovery cleared BEFORE posting so
+            //    that a still-failing sensor's alert is never dismissed.
+            synchronized(notificationLock) {
+                val counts = mapOf(
+                    "pressure" to result.consecutivePressureNull,
+                    "temperature" to result.consecutiveTemperatureNull,
+                    "humidity" to result.consecutiveHumidityNull
+                )
+
+                // ── Handle recovery FIRST ──
+                // Clear ack flags for sensors that recovered (count == 0
+                // and were acknowledged). Save whether ANY sensor recovered
+                // so we know whether to dismiss at the end.
+                val recovered = listOf("pressure", "temperature", "humidity")
+                    .filter { counts[it] == 0 && isSensorAcknowledged(it) }
+                var anyRecovered = false
+                if (recovered.isNotEmpty()) {
+                    recovered.forEach { setSensorAcknowledged(it, false) }
+                    anyRecovered = true
+                    Log.i(TAG, "Acknowledged sensor recovered: ${recovered}")
+                }
+
+                // ── Determine current failure state ──
+                val currentlyFailing = counts.filter { it.value >= 2 }
+                val stillFailing = currentlyFailing.isNotEmpty()
+                val unackedAmongFailing = currentlyFailing.keys
+                    .filter { !isSensorAcknowledged(it) }
+
+                // ── Post or update notification ──
+                if (stillFailing) {
+                    // Build countPairs with DISPLAY names (capitalized)
+                    val countPairs = currentlyFailing.map {
+                        Pair(SENSOR_DISPLAY_NAMES[it.key]!!, it.value)
+                    }
+
+                    if (unackedAmongFailing.isNotEmpty()) {
+                        // There is at least one unacknowledged failing sensor → post on ALERT channel
+                        if (!alertPostedForEpisode) {
+                            // First time this episode: play sound
+                            com.sreer.rainfallmonitor.notification.NotificationHelper
+                                .showSensorFailureAlert(this@MqttService, countPairs, forceSound = true)
+                            alertPostedForEpisode = true
+                            Log.w(TAG, "Sensor failure notification (with sound): ${unackedAmongFailing}")
+                        } else {
+                            // Already notified: update silently, no re-sound
+                            com.sreer.rainfallmonitor.notification.NotificationHelper
+                                .showSensorFailureAlert(this@MqttService, countPairs, forceSound = false)
+                            Log.d(TAG, "Sensor failure notification (silent update): ${unackedAmongFailing}")
+                        }
+                    } else {
+                        // All failing sensors are acknowledged → SILENT channel
+                        com.sreer.rainfallmonitor.notification.NotificationHelper
+                            .showSensorFailureSilent(this@MqttService, countPairs)
+                        Log.d(TAG, "Silent failure update for acknowledged: ${currentlyFailing.keys}")
+                    }
+                } else if (anyRecovered) {
+                    // Every sensor recovered and no sensors are failing → dismiss
+                    com.sreer.rainfallmonitor.notification.NotificationHelper
+                        .dismissSensorFailureAlert(this@MqttService)
+                    alertPostedForEpisode = false
+                    Log.i(TAG, "All sensors recovered — dismissed failure notification")
+                } else if (!stillFailing && alertPostedForEpisode) {
+                    // Natural recovery without ack — dismiss stale notification
+                    com.sreer.rainfallmonitor.notification.NotificationHelper
+                        .dismissSensorFailureAlert(this@MqttService)
+                    alertPostedForEpisode = false
+                    Log.i(TAG, "Sensors recovered naturally — dismissed stale notification")
+                }
+
+                // ── Persist consecutive-null counts and fresh timestamp ──
+                // These survive service restarts so the counter doesn't reset.
+                // Inside synchronized block to prevent interleaving races
+                // when multiple processMessage coroutines run concurrently.
+                prefs.edit()
+                    .putInt(PREF_PRESSURE_NULL_COUNT, result.consecutivePressureNull)
+                    .putInt(PREF_TEMP_NULL_COUNT, result.consecutiveTemperatureNull)
+                    .putInt(PREF_HUMIDITY_NULL_COUNT, result.consecutiveHumidityNull)
+                    .putLong(PREF_LAST_FRESH_TS, timestamp)
+                    .apply()
+            }
+
+            // 7. Rain transition detection (fresh messages only)
             val previousRate = prefs.getFloat(PREF_LAST_RATE, 0f)
             val wasRaining = previousRate > 0f
             val isRaining = rate > 0f
@@ -755,5 +955,62 @@ class MqttService : Service() {
         val notification = buildNotification(text)
         val manager = getSystemService(android.app.NotificationManager::class.java)
         manager.notify(NOTIFICATION_ID, notification)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // SENSOR FAILURE ACKNOWLEDGE
+    // ═══════════════════════════════════════════════════════════════════
+
+    /**
+     * Checks whether the user has acknowledged a failure for the given sensor.
+     */
+    private fun isSensorAcknowledged(sensor: String): Boolean {
+        return when (sensor) {
+            "pressure" -> prefs.getBoolean(PREF_PRESSURE_ACKED, false)
+            "temperature" -> prefs.getBoolean(PREF_TEMP_ACKED, false)
+            "humidity" -> prefs.getBoolean(PREF_HUMIDITY_ACKED, false)
+            else -> false
+        }
+    }
+
+    /**
+     * Persists the acknowledge flag for a sensor.
+     */
+    private fun setSensorAcknowledged(sensor: String, acked: Boolean) {
+        val key = when (sensor) {
+            "pressure" -> PREF_PRESSURE_ACKED
+            "temperature" -> PREF_TEMP_ACKED
+            "humidity" -> PREF_HUMIDITY_ACKED
+            else -> return
+        }
+        prefs.edit().putBoolean(key, acked).apply()
+        Log.i(TAG, "Sensor ${sensor} acknowledge set to $acked")
+    }
+
+    /**
+     * Handles the acknowledge action from the notification button.
+     * Moves all currently failing sensors to the "acknowledged" state,
+     * which causes subsequent failure notifications to post silently.
+     */
+    private fun handleAcknowledge() {
+        synchronized(notificationLock) {
+            val consecutive = mapOf(
+                "pressure" to RainfallRepository.consecutiveFreshPressureNull.value,
+                "temperature" to RainfallRepository.consecutiveFreshTemperatureNull.value,
+                "humidity" to RainfallRepository.consecutiveFreshHumidityNull.value
+            )
+            val failing = consecutive.filter { it.value >= 2 }
+            failing.keys.forEach { setSensorAcknowledged(it, true) }
+            alertPostedForEpisode = false  // allow sound if a NEW sensor fails later
+
+            if (failing.isNotEmpty()) {
+                val countPairs = failing.map { Pair(SENSOR_DISPLAY_NAMES[it.key]!!, it.value) }
+                com.sreer.rainfallmonitor.notification.NotificationHelper
+                    .dismissSensorFailureAlert(this@MqttService)
+                com.sreer.rainfallmonitor.notification.NotificationHelper
+                    .showSensorFailureSilent(this@MqttService, countPairs)
+                Log.i(TAG, "Acknowledge processed for: ${failing.keys} — moved to silent")
+            }
+        }
     }
 }

@@ -35,17 +35,14 @@
             android:contentDescription="Close"
             app:tint="@color/on_surface_secondary" />
 
-        <!-- Title -->
-        <TextView
-            android:id="@+id/textTitle"
+        <!-- Mode Spinner (dropdown) -->
+        <Spinner
+            android:id="@+id/spinnerMode"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:textSize="18sp"
-            android:textStyle="bold"
-            android:textColor="@color/on_surface"
-            android:paddingStart="8dp"
-            android:text="@string/readings_activity_title" />
+            android:layout_marginStart="8dp"
+            android:backgroundTint="@color/on_surface" />
 
         <ImageView
             android:id="@+id/imgTitleWarning"
@@ -103,6 +100,27 @@
             android:padding="6dp"
             android:contentDescription="Pick date"
             app:tint="@color/on_surface" />
+
+        <!-- Separator dot -->
+        <View
+            android:layout_width="3dp"
+            android:layout_height="3dp"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/connection_dot"
+            android:backgroundTint="@color/chart_label" />
+
+        <!-- Switch to Graph -->
+        <ImageButton
+            android:id="@+id/btnSwitchGraph"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_graph"
+            android:scaleType="centerInside"
+            android:padding="6dp"
+            android:contentDescription="Switch to Graph"
+            app:tint="@color/primary" />
 
     </LinearLayout>
 

@@ -39,13 +39,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val db = AppDatabase.getInstance(application)
     private val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.US)
 
-    // ── Sensor mode ────────────────────────────────────────────────
-    private val _sensorMode = MutableStateFlow(SensorMode.RAINFALL)
-    val sensorMode: StateFlow<SensorMode> = _sensorMode.asStateFlow()
+    // ── Sensor mode (shared via RainfallRepository) ─────────────────
+    val sensorMode: StateFlow<SensorMode> = RainfallRepository.sensorMode
 
-    fun setSensorMode(mode: SensorMode) {
-        _sensorMode.value = mode
-    }
+    fun setSensorMode(mode: SensorMode) = RainfallRepository.setSensorMode(mode)
 
     // ── Live data from Repository (written by MqttService) ───────────
     val hourlyRate: StateFlow<Float> = RainfallRepository.hourlyRate
@@ -150,7 +147,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return when {
             minutes < 1 -> "just now"
             minutes < 60 -> "$minutes min ago"
-            hours < 24 -> "$hours hour${if (hours > 1) "s" else ""} ago"
+            hours < 24 -> {
+                val remMinutes = minutes % 60
+                if (remMinutes == 0L) {
+                    "$hours hour${if (hours > 1) "s" else ""} ago"
+                } else {
+                    "$hours hour${if (hours > 1) "s" else ""} $remMinutes min ago"
+                }
+            }
             else -> {
                 val days = hours / 24
                 "$days day${if (days > 1) "s" else ""} ago"
@@ -275,9 +279,3 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 }
 
-enum class SensorMode {
-    RAINFALL,
-    TEMPERATURE,
-    PRESSURE,
-    HUMIDITY
-}

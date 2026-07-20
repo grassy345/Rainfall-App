@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Color
 import android.view.LayoutInflater
 import android.view.ViewGroup
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
@@ -177,6 +178,28 @@ class ReadingsAdapter : ListAdapter<ReadingsListItem, RecyclerView.ViewHolder>(D
                     }
                 }
             }
+
+            binding.root.setOnLongClickListener {
+                val label = when (mode) {
+                    SensorMode.RAINFALL -> getRainfallIntensityLabel(reading.hourlyRate)
+                    SensorMode.TEMPERATURE -> {
+                        val v = reading.temperature
+                        if (v != null) getTemperatureIntensityLabel(v) else null
+                    }
+                    SensorMode.PRESSURE -> {
+                        val v = reading.pressure
+                        if (v != null) getPressureIntensityLabel(v) else null
+                    }
+                    SensorMode.HUMIDITY -> {
+                        val v = reading.humidity
+                        if (v != null) getHumidityIntensityLabel(v) else null
+                    }
+                }
+                if (label != null) {
+                    Toast.makeText(ctx, label, Toast.LENGTH_SHORT).show()
+                    true
+                } else false
+            }
         }
 
         private fun applyTint(ctx: Context, colorRes: Int) {
@@ -216,6 +239,38 @@ class ReadingsAdapter : ListAdapter<ReadingsListItem, RecyclerView.ViewHolder>(D
             humidity <= 70f -> R.color.humidity_humid
             humidity <= 85f -> R.color.humidity_very_humid
             else -> R.color.humidity_extreme
+        }
+
+        private fun getRainfallIntensityLabel(rate: Float): String = when {
+            rate <= 0f -> "No Rain"
+            rate <= 2.5f -> "Light Rain"
+            rate <= 7.5f -> "Moderate Rain"
+            rate <= 50f -> "Heavy Rain"
+            else -> "Violent Rain"
+        }
+
+        private fun getTemperatureIntensityLabel(temp: Float): String = when {
+            temp <= 15f -> "Cool"
+            temp <= 25f -> "Mild"
+            temp <= 35f -> "Warm"
+            temp <= 40f -> "Hot"
+            else -> "Extreme"
+        }
+
+        private fun getPressureIntensityLabel(pressure: Float): String = when {
+            pressure < 1000f -> "Low"
+            pressure < 1013f -> "Below Normal"
+            pressure < 1025f -> "Normal"
+            pressure < 1040f -> "High"
+            else -> "Very High"
+        }
+
+        private fun getHumidityIntensityLabel(humidity: Float): String = when {
+            humidity <= 30f -> "Dry"
+            humidity <= 50f -> "Comfortable"
+            humidity <= 70f -> "Humid"
+            humidity <= 85f -> "Very Humid"
+            else -> "Extreme"
         }
     }
 

@@ -38,5 +38,17 @@
     <string name="readings_header_today">Today\'s Readings</string>
     <string name="readings_no_data">No readings for this date</string>
     <string name="readings_fullscreen_desc">View all readings</string>
-    <string name="readings_activity_title">Readings</string>
+    <!-- ── Mode Spinner ──────────────────────────────────────────── -->
+    <string-array name="sensor_modes">
+        <item>Rainfall Data</item>
+        <item>Temperature Data</item>
+        <item>Pressure Data</item>
+        <item>Humidity Data</item>
+    </string-array>
+
+    <!-- Mode abbreviations for Spinner closed-state -->
+    <string name="mode_abbr_rainfall">RD</string>
+    <string name="mode_abbr_temperature">TD</string>
+    <string name="mode_abbr_pressure">PD</string>
+    <string name="mode_abbr_humidity">HD</string>
 </resources>

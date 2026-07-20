@@ -34,6 +34,7 @@ import com.sreer.rainfallmonitor.data.entity.RainfallReading
 import com.sreer.rainfallmonitor.databinding.ActivityMainBinding
 import com.sreer.rainfallmonitor.mqtt.MqttService
 import com.sreer.rainfallmonitor.repository.ConnectionState
+import com.sreer.rainfallmonitor.repository.RainfallRepository
 import com.sreer.rainfallmonitor.ui.MainViewModel
 import com.sreer.rainfallmonitor.ui.SensorMode
 import com.sreer.rainfallmonitor.ui.graph.GraphActivity
@@ -105,6 +106,11 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // 0. Reset sensor mode to RAINFALL on fresh launch (not rotation)
+        if (savedInstanceState == null) {
+            RainfallRepository.setSensorMode(SensorMode.RAINFALL)
+        }
+
         // 1. Start the MQTT service (backup — in case boot receiver didn't fire)
         startMqttService()
 
@@ -125,18 +131,14 @@ class MainActivity : AppCompatActivity() {
 
         // 7. Fullscreen button -> opens landscape graph screen
         binding.btnFullscreen.setOnClickListener {
-            val intent = Intent(this, GraphActivity::class.java).apply {
-                putExtra("sensor_mode", viewModel.sensorMode.value.name)
-            }
-            startActivity(intent)
+            RainfallRepository.updateFullscreenChain(false)
+            startActivity(Intent(this, GraphActivity::class.java))
         }
 
         // 8. Readings fullscreen button -> opens readings table
         binding.btnReadingsFullscreen.setOnClickListener {
-            val intent = Intent(this, ReadingsActivity::class.java).apply {
-                putExtra("sensor_mode", viewModel.sensorMode.value.name)
-            }
-            startActivity(intent)
+            RainfallRepository.updateFullscreenChain(false)
+            startActivity(Intent(this, ReadingsActivity::class.java))
         }
 
         // 9. Mode switcher buttons
@@ -445,17 +447,20 @@ class MainActivity : AppCompatActivity() {
         stalenessFn: () -> Boolean
     ) {
         if (value != null) {
-            textView.text = formatFn(value)
+            val text = formatFn(value)
             val isStale = stalenessFn()
+            textView.text = if (isStale) "$text [S]" else text
             val colorRes = if (isStale) R.color.intensity_stale else colorFn(value)
             val color = ContextCompat.getColor(this, colorRes)
             textView.setTextColor(color)
             iconView.colorFilter = BlendModeColorFilterCompat.createBlendModeColorFilterCompat(color, BlendModeCompat.SRC_IN)
         } else {
-            textView.text = "--"
-            val secondaryColor = ContextCompat.getColor(this, R.color.on_surface_secondary)
-            textView.setTextColor(secondaryColor)
-            iconView.colorFilter = BlendModeColorFilterCompat.createBlendModeColorFilterCompat(secondaryColor, BlendModeCompat.SRC_IN)
+            val isStale = stalenessFn()
+            textView.text = if (isStale) "N/A [S]" else "N/A"
+            val colorRes = if (isStale) R.color.intensity_stale else R.color.color_no_data
+            val color = ContextCompat.getColor(this, colorRes)
+            textView.setTextColor(color)
+            iconView.colorFilter = BlendModeColorFilterCompat.createBlendModeColorFilterCompat(color, BlendModeCompat.SRC_IN)
         }
     }
 

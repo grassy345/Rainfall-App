@@ -1,10 +1,13 @@
 package com.sreer.rainfallmonitor.ui.graph
 
+import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
@@ -20,7 +23,9 @@ import com.google.android.material.datepicker.MaterialDatePicker
 import com.sreer.rainfallmonitor.R
 import com.sreer.rainfallmonitor.data.entity.RainfallReading
 import com.sreer.rainfallmonitor.databinding.FragmentGraphBinding
+import com.sreer.rainfallmonitor.repository.RainfallRepository
 import com.sreer.rainfallmonitor.ui.SensorMode
+import com.sreer.rainfallmonitor.ui.table.ReadingsActivity
 
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -69,10 +74,11 @@ class GraphFragment : Fragment() {
     /** MarkerView for tap-to-inspect tooltips. */
     private lateinit var markerView: ChartMarkerView
 
-    /** Sensor mode from the launching activity — determines chart field, colour, and Y-axis. */
-    private val mode: SensorMode by lazy {
-        arguments?.getString("sensor_mode")?.let { SensorMode.valueOf(it) } ?: SensorMode.RAINFALL
-    }
+    /** Current sensor mode — updated by the repository observer. */
+    private var currentMode = SensorMode.RAINFALL
+
+    /** Prevents infinite loop when programmatically setting the Spinner. */
+    private var suppressSpinnerListener = false
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -85,15 +91,91 @@ class GraphFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        viewModel.setMode(mode)
+
+        val fromFullscreen = requireActivity().intent
+            .getBooleanExtra("from_fullscreen", false)
+        viewModel.restoreDateFromSharedIfNeeded(fromFullscreen)
+        viewModel.enableDateSyncToRepository()
+
+        setupSpinner()
         setupChart()
         setupNavigation()
         observeData()
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (RainfallRepository.isFullscreenChainActive.value) {
+            val sharedDate = RainfallRepository.fullscreenSelectedDate.value
+            if (sharedDate.isNotEmpty() && sharedDate != viewModel.selectedDate.value) {
+                viewModel.navigateToDate(sharedDate)
+            }
+        }
+    }
+
     override fun onDestroyView() {
         super.onDestroyView()
         _binding = null
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // MODE SPINNER
+    // ═══════════════════════════════════════════════════════════════════
+
+    private fun setupSpinner() {
+        ArrayAdapter(
+            requireContext(),
+            R.layout.spinner_item_graph,
+            resources.getStringArray(R.array.sensor_modes)
+        ).also { adapter ->
+            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            binding.spinnerMode.adapter = adapter
+        }
+        // Initialize Spinner to the current mode
+        binding.spinnerMode.setSelection(RainfallRepository.sensorMode.value.ordinal, false)
+
+        binding.spinnerMode.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(
+                parent: AdapterView<*>?,
+                view: View?,
+                position: Int,
+                id: Long
+            ) {
+                if (suppressSpinnerListener) return
+                val newMode = SensorMode.values()[position]
+                if (newMode != RainfallRepository.sensorMode.value) {
+                    RainfallRepository.setSensorMode(newMode)
+                }
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+    }
+
+    /**
+     * Re-applies Y-axis range and marker mode for the current mode.
+     * Called when mode changes so the chart adapts immediately.
+     */
+    private fun reinitChart() {
+        val chart = binding.chartFullscreen
+        val yAxis = chart.axisLeft
+        when (currentMode) {
+            SensorMode.RAINFALL -> yAxis.axisMinimum = 0f
+            SensorMode.TEMPERATURE -> {
+                yAxis.resetAxisMinimum()
+                yAxis.resetAxisMaximum()
+            }
+            SensorMode.PRESSURE -> {
+                yAxis.resetAxisMinimum()
+                yAxis.resetAxisMaximum()
+            }
+            SensorMode.HUMIDITY -> {
+                yAxis.axisMinimum = 0f
+                yAxis.axisMaximum = 100f
+            }
+        }
+        markerView.sensorMode = currentMode
+        chart.notifyDataSetChanged()
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -138,7 +220,7 @@ class GraphFragment : Fragment() {
         yAxis.gridColor = ContextCompat.getColor(ctx, R.color.chart_grid)
         yAxis.textColor = ContextCompat.getColor(ctx, R.color.chart_label)
         yAxis.textSize = 11f
-        when (mode) {
+        when (currentMode) {
             SensorMode.RAINFALL -> {
                 yAxis.axisMinimum = 0f
             }
@@ -167,7 +249,7 @@ class GraphFragment : Fragment() {
         // Set up MarkerView for tap-to-inspect tooltips
         markerView = ChartMarkerView(ctx)
         markerView.chartView = chart
-        markerView.sensorMode = mode
+        markerView.sensorMode = currentMode
         chart.marker = markerView
     }
 
@@ -190,6 +272,14 @@ class GraphFragment : Fragment() {
 
         binding.btnClose.setOnClickListener {
             requireActivity().onBackPressedDispatcher.onBackPressed()
+        }
+
+        binding.btnSwitchReadings.setOnClickListener {
+            RainfallRepository.updateFullscreenChain(true)
+            startActivity(Intent(requireActivity(), ReadingsActivity::class.java).apply {
+                putExtra("from_fullscreen", true)
+            })
+            requireActivity().finish()
         }
 
         // "Jump to Today" chip
@@ -224,6 +314,23 @@ class GraphFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
 
+                // Observe shared mode — updates Spinner, chart, and ViewModel
+                launch {
+                    RainfallRepository.sensorMode.collect { mode ->
+                        currentMode = mode
+                        viewModel.setMode(mode)
+                        suppressSpinnerListener = true
+                        binding.spinnerMode.setSelection(mode.ordinal, false)
+                        suppressSpinnerListener = false
+                        reinitChart()
+                        if (cachedReadings.isNotEmpty()) {
+                            viewModel.buildChartData(cachedReadings, mode) { chartData ->
+                                renderChart(chartData)
+                            }
+                        }
+                    }
+                }
+
                 // Track available dates for navigation
                 launch {
                     viewModel.datesWithData.collect { dates ->
@@ -248,8 +355,13 @@ class GraphFragment : Fragment() {
                         updateNavigationButtons()
 
                         // Show/hide "Jump to Today" chip
-                        binding.chipToday.visibility =
-                            if (isToday) View.GONE else View.VISIBLE
+                        if (isToday) {
+                            binding.chipToday.visibility = View.INVISIBLE
+                            binding.chipToday.isClickable = false
+                        } else {
+                            binding.chipToday.visibility = View.VISIBLE
+                            binding.chipToday.isClickable = true
+                        }
 
                         // Update X-axis formatter + MarkerView midnight
                         val midnightMs = viewModel.computeMidnightMs(currentDate)
@@ -257,7 +369,7 @@ class GraphFragment : Fragment() {
                         markerView.midnightMs = midnightMs
 
                         // Build and render chart data
-                        viewModel.buildChartData(readings, mode) { chartData ->
+                        viewModel.buildChartData(readings, currentMode) { chartData ->
                             renderChart(chartData)
                         }
                     }
@@ -269,7 +381,7 @@ class GraphFragment : Fragment() {
                     while (true) {
                         delay(1_000)
                         if (viewModel.isToday(viewModel.selectedDate.value) && cachedReadings.isNotEmpty()) {
-                            viewModel.buildChartData(cachedReadings, mode) { chartData ->
+                            viewModel.buildChartData(cachedReadings, currentMode) { chartData ->
                                 renderChart(chartData)
                             }
                         }
@@ -290,7 +402,7 @@ class GraphFragment : Fragment() {
 
         if (chartData.segments.isEmpty()) {
             chart.visibility = View.GONE
-            binding.textNoData.text = getString(R.string.graph_no_data_mode, when (mode) {
+            binding.textNoData.text = getString(R.string.graph_no_data_mode, when (currentMode) {
                 SensorMode.RAINFALL -> getString(R.string.mode_rainfall)
                 SensorMode.TEMPERATURE -> getString(R.string.mode_temperature)
                 SensorMode.PRESSURE -> getString(R.string.mode_pressure)
@@ -304,7 +416,7 @@ class GraphFragment : Fragment() {
         chart.visibility = View.VISIBLE
         binding.textNoData.visibility = View.GONE
 
-        val lineColorRes = when (mode) {
+        val lineColorRes = when (currentMode) {
             SensorMode.RAINFALL -> R.color.chart_line_rainfall
             SensorMode.TEMPERATURE -> R.color.chart_line_temperature
             SensorMode.PRESSURE -> R.color.chart_line_pressure
@@ -347,7 +459,7 @@ class GraphFragment : Fragment() {
             val maxRate = chartData.segments
                 .flatMap { it.entries }
                 .maxOfOrNull { it.y } ?: 0f
-            hatchY = when (mode) {
+            hatchY = when (currentMode) {
                 SensorMode.RAINFALL -> maxOf(maxRate * 1.3f, 5f)
                 SensorMode.TEMPERATURE -> maxOf(maxRate + 5f, 25f)
                 SensorMode.PRESSURE -> maxOf(maxRate + 10f, 1010f)

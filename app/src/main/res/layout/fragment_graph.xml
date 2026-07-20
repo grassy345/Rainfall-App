@@ -48,22 +48,54 @@
     </com.google.android.material.card.MaterialCardView>
 
     <!-- ═══════════════════════════════════════════════════════════ -->
-    <!-- FLOATING DATE NAVIGATION — frosted pill, top center         -->
+    <!-- TOP BAR: Mode Spinner + Date Nav + Switch + Close           -->
     <!-- ═══════════════════════════════════════════════════════════ -->
     <LinearLayout
-        android:id="@+id/layoutDateNav"
-        android:layout_width="wrap_content"
+        android:id="@+id/topBar"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_gravity="top|center_horizontal"
+        android:layout_gravity="top"
+        android:layout_marginStart="8dp"
+        android:layout_marginEnd="8dp"
         android:layout_marginTop="8dp"
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:background="@drawable/bg_floating_pill"
         android:elevation="8dp"
-        android:paddingStart="2dp"
-        android:paddingEnd="2dp"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp"
         android:paddingTop="2dp"
         android:paddingBottom="2dp">
+
+        <!-- Mode Spinner -->
+        <Spinner
+            android:id="@+id/spinnerMode"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:backgroundTint="@color/on_surface" />
+
+        <!-- Spacer — pushes everything after it to the right -->
+        <View
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <!-- Jump to Today (hidden when viewing today) -->
+        <TextView
+            android:id="@+id/chipToday"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:text="↩ Jump to Today"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/primary"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:visibility="gone"
+            tools:visibility="visible" />
 
         <!-- ← Previous date -->
         <ImageButton
@@ -110,7 +142,7 @@
             android:background="@drawable/connection_dot"
             android:backgroundTint="@color/chart_label" />
 
-        <!-- 📅 Calendar picker -->
+        <!-- Calendar picker -->
         <ImageButton
             android:id="@+id/btnCalendar"
             android:layout_width="36dp"
@@ -122,47 +154,41 @@
             android:contentDescription="Pick date"
             app:tint="@color/on_surface" />
 
+        <!-- Separator dot -->
+        <View
+            android:layout_width="3dp"
+            android:layout_height="3dp"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/connection_dot"
+            android:backgroundTint="@color/chart_label" />
+
+        <!-- Switch to Readings -->
+        <TextView
+            android:id="@+id/btnSwitchReadings"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:gravity="center"
+            android:paddingStart="8dp"
+            android:paddingEnd="4dp"
+            android:text="Readings"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="@color/primary"
+            android:background="?attr/selectableItemBackgroundBorderless" />
+
+        <!-- Close -->
+        <ImageButton
+            android:id="@+id/btnClose"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_close"
+            android:scaleType="centerInside"
+            android:padding="8dp"
+            android:contentDescription="Close"
+            app:tint="@color/on_surface_secondary" />
+
     </LinearLayout>
-
-    <!-- ═══════════════════════════════════════════════════════════ -->
-    <!-- FLOATING CLOSE BUTTON — frosted circle, top right           -->
-    <!-- ═══════════════════════════════════════════════════════════ -->
-    <ImageButton
-        android:id="@+id/btnClose"
-        android:layout_width="36dp"
-        android:layout_height="36dp"
-        android:layout_gravity="top|end"
-        android:layout_marginTop="8dp"
-        android:layout_marginEnd="8dp"
-        android:background="@drawable/bg_floating_circle"
-        android:elevation="8dp"
-        android:src="@drawable/ic_close"
-        android:scaleType="centerInside"
-        android:padding="8dp"
-        android:contentDescription="Close"
-        app:tint="@color/on_surface_secondary" />
-
-    <!-- ═══════════════════════════════════════════════════════════ -->
-    <!-- FLOATING "TODAY" CHIP — top-left, opposite the close button -->
-    <!-- ═══════════════════════════════════════════════════════════ -->
-    <TextView
-        android:id="@+id/chipToday"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top|start"
-        android:layout_marginTop="8dp"
-        android:layout_marginStart="8dp"
-        android:background="@drawable/bg_floating_pill"
-        android:elevation="8dp"
-        android:paddingStart="20dp"
-        android:paddingEnd="20dp"
-        android:paddingTop="8dp"
-        android:paddingBottom="8dp"
-        android:text="↩ Jump to Today"
-        android:textSize="13sp"
-        android:textStyle="bold"
-        android:textColor="@color/primary"
-        android:visibility="gone"
-        tools:visibility="visible" />
 
 </FrameLayout>

@@ -26,11 +26,20 @@ interface RainfallReadingDao {
     suspend fun insert(reading: RainfallReading)
 
     /**
-     * Get all readings for a specific date, ordered by time.
+     * Get all readings for a specific date, ordered by time (reactive).
      * Used by the graph to plot the full day's data (including rate=0 points).
      */
     @Query("SELECT * FROM rainfall_readings WHERE datestamp = :date ORDER BY timestamp ASC")
     fun getReadingsForDate(date: String): Flow<List<RainfallReading>>
+
+    /**
+     * Get all readings for a specific date, one-shot (non-reactive).
+     * Used by MqttService bootstrap to replay all readings chronologically
+     * so the Repository can correctly determine stateStartedAt (the last
+     * rain/no-rain transition time).
+     */
+    @Query("SELECT * FROM rainfall_readings WHERE datestamp = :date ORDER BY timestamp ASC")
+    suspend fun getReadingsForDateOnce(date: String): List<RainfallReading>
 
     /**
      * Get distinct dates that have at least one reading (any column).

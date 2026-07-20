@@ -2,14 +2,17 @@ package com.sreer.rainfallmonitor.ui
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import com.sreer.rainfallmonitor.data.AppDatabase
 import com.sreer.rainfallmonitor.data.dao.RainfallReadingDao
+import com.sreer.rainfallmonitor.repository.RainfallRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -38,19 +41,50 @@ abstract class BaseDateNavigationViewModel(application: Application) : AndroidVi
     private val _selectedDate = MutableStateFlow(getTodayDate())
     val selectedDate: StateFlow<String> = _selectedDate.asStateFlow()
 
-    // ── Sensor mode ──────────────────────────────────────────────────
+    // ── Sensor mode (shared via RainfallRepository) ─────────────────
 
-    private val _mode = MutableStateFlow(SensorMode.RAINFALL)
-    fun setMode(mode: SensorMode) { _mode.value = mode }
+    fun setMode(mode: SensorMode) = RainfallRepository.setSensorMode(mode)
 
     // ── Available dates (for date picker) ────────────────────────────
 
-    val datesWithData: Flow<List<String>> = _mode.flatMapLatest { m ->
+    val datesWithData: Flow<List<String>> = RainfallRepository.sensorMode.flatMapLatest { m ->
         when (m) {
             SensorMode.RAINFALL -> dao.getDatesWithRainfallData()
             SensorMode.TEMPERATURE -> dao.getDatesWithTemperatureData()
             SensorMode.PRESSURE -> dao.getDatesWithPressureData()
             SensorMode.HUMIDITY -> dao.getDatesWithHumidityData()
+        }
+    }
+
+    // ── Full-screen date persistence ──────────────────────────────────
+
+    /**
+     * If [fromFullscreen] is true and the repository has a shared date,
+     * jump to that date instead of Today. Called during activity/fragment
+     * creation before observers start.
+     */
+    fun restoreDateFromSharedIfNeeded(fromFullscreen: Boolean) {
+        if (fromFullscreen) {
+            RainfallRepository.fullscreenSelectedDate.value.takeIf { it.isNotEmpty() }
+                ?.let { _selectedDate.value = it }
+        }
+    }
+
+    private var syncEnabled = false
+
+    /**
+     * Starts syncing [selectedDate] changes back to
+     * [RainfallRepository.fullscreenSelectedDate] so the other
+     * full-screen window can pick up the date on resume.
+     * Safe to call multiple times — only one coroutine is launched.
+     */
+    fun enableDateSyncToRepository() {
+        if (syncEnabled) return
+        syncEnabled = true
+        viewModelScope.launch {
+            _selectedDate.collect { date ->
+                RainfallRepository.setFullscreenSelectedDate(date)
+            }
         }
     }
 

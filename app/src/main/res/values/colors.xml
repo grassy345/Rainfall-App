@@ -24,6 +24,7 @@
     <color name="intensity_heavy">#EF5350</color>      <!-- Red 400 — Heavy -->
     <color name="intensity_violent">#AB47BC</color>    <!-- Purple 400 — Violent -->
     <color name="intensity_stale">#9E9E9E</color>     <!-- Grey 500 — Stale (>15 min old) -->
+    <color name="color_no_data">#757575</color>      <!-- Grey 600 — No data (fresh N/A) -->
 
     <!-- ── Temperature Intensity Colors ─────────────────────────────── -->
     <color name="temp_cool">#43A047</color>          <!-- Green 600 — ≤ 15°C -->

@@ -156,8 +156,8 @@
                                         android:layout_height="wrap_content"
                                         android:textSize="14sp"
                                         android:textColor="@color/on_surface_secondary"
-                                        tools:text="--" />
-                                </LinearLayout>
+                                        tools:text="N/A" />
+                                    </LinearLayout>
 
                                 <!-- Pressure -->
                                 <LinearLayout
@@ -181,8 +181,8 @@
                                         android:layout_height="wrap_content"
                                         android:textSize="14sp"
                                         android:textColor="@color/on_surface_secondary"
-                                        tools:text="--" />
-                                </LinearLayout>
+                                        tools:text="N/A" />
+                                    </LinearLayout>
 
                                 <!-- Humidity -->
                                 <LinearLayout
@@ -206,7 +206,7 @@
                                         android:layout_height="wrap_content"
                                         android:textSize="14sp"
                                         android:textColor="@color/on_surface_secondary"
-                                        tools:text="--" />
+                                        tools:text="N/A" />
                                 </LinearLayout>
 
                             </LinearLayout>
